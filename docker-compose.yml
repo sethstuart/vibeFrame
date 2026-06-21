@@ -1,6 +1,6 @@
 services:
   vibeframe:
-    image: ghcr.io/sethstuart/vibeframe:latest
+    build: .
     container_name: vibeframe
     restart: unless-stopped
     ports:
@@ -18,7 +18,7 @@ services:
       # Host-mounted NFS share goes here. Mount on the Pi with fstab or systemd.mount,
       # then bind the mountpoint in. Example fstab line:
       #   nas:/photos /mnt/nas/photos nfs ro,vers=4.1,bg,soft,timeo=100 0 0
-      - /mnt/nas/photos:/photos
+      - /mnt/vibeFrame:/vibeFrame
       - vibeframe-state:/var/lib/vibeframe
       - vibeframe-cache:/var/cache/vibeframe
     env_file: .env
