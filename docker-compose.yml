@@ -23,14 +23,12 @@ services:
       - /mnt/vibeFrame:/vibeFrame
       - vibeframe-state:/var/lib/vibeframe
       - vibeframe-cache:/var/cache/vibeframe
-      # Host devicetree — gpiodevice (used by inky) reads
-      # /proc/device-tree/compatible to detect the Pi model and pick the
-      # right gpiochip. The container's procfs has /proc/device-tree as a
-      # symlink to /sys/firmware/devicetree/base but the target doesn't
-      # exist inside the container (sysfs is read-only, can't bind into it).
-      # Binding directly at /proc/device-tree replaces the broken symlink
-      # with the actual devicetree data resolved from the host symlink.
-      - /proc/device-tree:/proc/device-tree:ro
+      # Overlay the host's full sysfs read-only so the container can resolve
+      # the /proc/device-tree symlink (which targets /sys/firmware/devicetree
+      # /base — hidden from the default filtered container sysfs view).
+      # gpiodevice (used by inky) reads /proc/device-tree/compatible to
+      # detect the Pi model. Read-only is the smallest privilege needed.
+      - /sys:/sys:ro
     env_file: .env
 
 volumes:
