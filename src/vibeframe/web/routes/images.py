@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import shutil
 import time
@@ -11,6 +12,10 @@ from fastapi.responses import HTMLResponse, Response
 from vibeframe.library import IMAGE_EXTS
 from vibeframe.processor.pipeline import process
 from vibeframe.web.deps import AppState, get_state, require_token
+
+THUMB_MAX_SIDE = 320
+THUMB_QUALITY = 80
+THUMB_CACHE_HEADERS = {"Cache-Control": "public, max-age=86400"}
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -39,7 +44,7 @@ async def list_images(
 
 
 @router.post("/upload", dependencies=[Depends(require_token)])
-async def upload(
+def upload(
     file: UploadFile = File(...),
     state: AppState = Depends(get_state),
 ):
@@ -57,7 +62,7 @@ async def upload(
 
 
 @router.delete("/{image_id}", dependencies=[Depends(require_token)])
-async def delete_image(image_id: int, state: AppState = Depends(get_state)):
+def delete_image(image_id: int, state: AppState = Depends(get_state)):
     img = state.library.get(image_id)
     if not img:
         raise HTTPException(status_code=404, detail="not found")
@@ -70,27 +75,51 @@ async def delete_image(image_id: int, state: AppState = Depends(get_state)):
 
 
 @router.get("/{image_id}/preview.png")
-async def preview(image_id: int, state: AppState = Depends(get_state)):
+def preview(image_id: int, state: AppState = Depends(get_state)):
     img = state.library.get(image_id)
     if not img:
         raise HTTPException(status_code=404, detail="not found")
     processed = process(Path(img.path), state.settings, state.cache)
     buf = io.BytesIO()
     processed.image.convert("RGB").save(buf, format="PNG")
-    return Response(content=buf.getvalue(), media_type="image/png")
+    return Response(
+        content=buf.getvalue(), media_type="image/png", headers=THUMB_CACHE_HEADERS
+    )
+
+
+def _thumb_cache_path(state: AppState, src: Path) -> Path:
+    stat = src.stat()
+    key = hashlib.sha256(f"{src}|{stat.st_mtime_ns}|{stat.st_size}".encode()).hexdigest()
+    return state.settings.cache_dir / "thumbs" / f"{key}.jpg"
 
 
 @router.get("/{image_id}/thumb.png")
-async def thumb(image_id: int, state: AppState = Depends(get_state)):
+def thumb(image_id: int, state: AppState = Depends(get_state)):
     from PIL import Image as PILImage
     from PIL import ImageOps
 
     img = state.library.get(image_id)
     if not img:
         raise HTTPException(status_code=404, detail="not found")
-    with PILImage.open(img.path) as src:
+    src_path = Path(img.path)
+    cached = _thumb_cache_path(state, src_path)
+    if cached.is_file():
+        return Response(
+            content=cached.read_bytes(),
+            media_type="image/jpeg",
+            headers=THUMB_CACHE_HEADERS,
+        )
+
+    with PILImage.open(src_path) as src:
         src = ImageOps.exif_transpose(src).convert("RGB")
-        src.thumbnail((320, 320), PILImage.Resampling.LANCZOS)
+        src.thumbnail((THUMB_MAX_SIDE, THUMB_MAX_SIDE), PILImage.Resampling.LANCZOS)
         buf = io.BytesIO()
-        src.save(buf, format="JPEG", quality=80)
-    return Response(content=buf.getvalue(), media_type="image/jpeg")
+        src.save(buf, format="JPEG", quality=THUMB_QUALITY)
+
+    data = buf.getvalue()
+    try:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_bytes(data)
+    except OSError:
+        pass
+    return Response(content=data, media_type="image/jpeg", headers=THUMB_CACHE_HEADERS)

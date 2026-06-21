@@ -48,10 +48,9 @@ async def trigger_next(state: AppState = Depends(get_state)):
     return {"queued": True}
 
 
-@router.get("/system/test-pattern.png")
-async def test_pattern(state: AppState = Depends(get_state)):
+def _build_test_pattern(orientation: int) -> Image.Image:
     w, h = 800, 480
-    if state.settings.orientation in (90, 270):
+    if orientation in (90, 270):
         w, h = h, w
     img = Image.new("RGB", (w, h), "white")
     draw = ImageDraw.Draw(img)
@@ -59,21 +58,19 @@ async def test_pattern(state: AppState = Depends(get_state)):
     bar_w = w // n
     for i, color in enumerate(SPECTRA6):
         draw.rectangle([i * bar_w, 0, (i + 1) * bar_w, h], fill=color)
+    return img
+
+
+@router.get("/system/test-pattern.png")
+def test_pattern(state: AppState = Depends(get_state)):
+    img = _build_test_pattern(state.settings.orientation)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return Response(content=buf.getvalue(), media_type="image/png")
 
 
 @router.post("/system/test-pattern", dependencies=[Depends(require_token)])
-async def show_test_pattern(state: AppState = Depends(get_state)):
-    w, h = 800, 480
-    if state.settings.orientation in (90, 270):
-        w, h = h, w
-    img = Image.new("RGB", (w, h), "white")
-    draw = ImageDraw.Draw(img)
-    n = len(SPECTRA6)
-    bar_w = w // n
-    for i, color in enumerate(SPECTRA6):
-        draw.rectangle([i * bar_w, 0, (i + 1) * bar_w, h], fill=color)
+def show_test_pattern(state: AppState = Depends(get_state)):
+    img = _build_test_pattern(state.settings.orientation)
     state.driver.show(img)
     return {"shown": True}
