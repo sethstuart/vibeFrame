@@ -25,9 +25,9 @@ async def home(request: Request, state: AppState = Depends(get_state)):
                 break
     now_local = datetime.now(tz=state.settings.zoneinfo)
     return request.app.state.templates.TemplateResponse(
+        request,
         "home.html",
         {
-            "request": request,
             "last_path": last_path,
             "last_id": last_id,
             "last_shown_at": state.scheduler.last_shown_at,

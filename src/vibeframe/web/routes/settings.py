@@ -14,8 +14,9 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 @router.get("", response_class=HTMLResponse)
 async def view_settings(request: Request, state: AppState = Depends(get_state)):
     return request.app.state.templates.TemplateResponse(
+        request,
         "settings.html",
-        {"request": request, "s": state.settings},
+        {"s": state.settings},
     )
 
 

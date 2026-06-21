@@ -82,3 +82,18 @@ def test_test_pattern_endpoint(tmp_settings):
             assert r.headers["content-type"] == "image/png"
 
     asyncio.run(run())
+
+
+def test_html_pages_render(tmp_settings):
+    tmp_settings.ensure_dirs()
+    app, _ = _setup(tmp_settings)
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            for path in ("/", "/images", "/settings"):
+                r = await client.get(path)
+                assert r.status_code == 200, f"{path} -> {r.status_code}: {r.text[:200]}"
+                assert "text/html" in r.headers["content-type"]
+
+    asyncio.run(run())

@@ -26,9 +26,9 @@ async def list_images(
     images = state.library.list(limit=limit, offset=offset, favorites_only=favorites_only)
     favorite_ids = set(state.library.all_ids(favorites_only=True))
     return request.app.state.templates.TemplateResponse(
+        request,
         "images.html",
         {
-            "request": request,
             "images": images,
             "favorite_ids": favorite_ids,
             "favorites_only": favorites_only,
