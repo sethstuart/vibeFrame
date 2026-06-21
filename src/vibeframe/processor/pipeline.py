@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 from PIL import Image, ImageOps
@@ -10,6 +11,7 @@ from PIL import Image, ImageOps
 from vibeframe.cache import Cache, CacheKey, params_hash
 from vibeframe.config import Settings
 from vibeframe.processor import crop, dither, palette, tonemap
+from vibeframe.timing import record, timed
 
 try:  # HEIC/HEIF support is optional but desirable.
     import pillow_heif  # type: ignore
@@ -69,6 +71,7 @@ def process(
     directly. Otherwise we fall back to (path, mtime, size) so the cache lookup never
     requires reading the source file — only a missed lookup pays the decode cost.
     """
+    start = perf_counter()
     target_w, target_h = _target_size(settings.orientation)
     params = _pipeline_params(settings, target_w, target_h)
 
@@ -80,24 +83,38 @@ def process(
     key = CacheKey(source_sha256=source_key, params_hash=params_hash(params))
 
     if cache is not None:
-        cached = cache.get(key)
+        with timed("pipeline.cache.lookup"):
+            cached = cache.get(key)
         if cached is not None:
-            return ProcessedImage(path=path, image=Image.open(cached), source_sha256=source_key)
+            result = ProcessedImage(
+                path=path, image=Image.open(cached), source_sha256=source_key
+            )
+            record("pipeline.process.hit", perf_counter() - start)
+            return result
 
-    with Image.open(path) as img:
-        img.load()
-        oriented = ImageOps.exif_transpose(img).convert("RGB")
+    with timed("pipeline.image.open"):
+        with Image.open(path) as img:
+            img.load()
+        with timed("pipeline.exif.transpose"):
+            oriented = ImageOps.exif_transpose(img).convert("RGB")
 
-    cropped = crop.crop_to(oriented, target_w, target_h, settings.crop_mode)
-    toned = tonemap.apply(cropped, settings.saturation, settings.contrast)
+    with timed(f"pipeline.crop.{settings.crop_mode}"):
+        cropped = crop.crop_to(oriented, target_w, target_h, settings.crop_mode)
+    with timed("pipeline.tonemap"):
+        toned = tonemap.apply(cropped, settings.saturation, settings.contrast)
 
-    src_array = np.array(toned, dtype=np.uint8)
-    indices = dither.dither(src_array, settings.dither, palette.SPECTRA6)
-    out = _build_p_image(indices, palette.SPECTRA6)
+    with timed("pipeline.ndarray"):
+        src_array = np.array(toned, dtype=np.uint8)
+    with timed(f"pipeline.dither.{settings.dither}"):
+        indices = dither.dither(src_array, settings.dither, palette.SPECTRA6)
+    with timed("pipeline.palette.build_p"):
+        out = _build_p_image(indices, palette.SPECTRA6)
 
     if cache is not None:
-        buf = BytesIO()
-        out.save(buf, format="PNG")
-        cache.put_bytes(key, buf.getvalue())
+        with timed("pipeline.cache.write"):
+            buf = BytesIO()
+            out.save(buf, format="PNG")
+            cache.put_bytes(key, buf.getvalue())
 
+    record("pipeline.process.miss", perf_counter() - start)
     return ProcessedImage(path=path, image=out, source_sha256=source_key)

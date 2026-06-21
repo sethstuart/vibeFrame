@@ -1,8 +1,17 @@
 services:
   vibeframe:
-    build: .
+    build:
+      context: .
+      # To enable py-spy profiling in the image, build with:
+      #   docker compose build --build-arg INSTALL_PROFILE=1
+      # Off by default to keep the image slim.
+      args:
+        INSTALL_PROFILE: 0
     container_name: vibeframe
     restart: unless-stopped
+    # Uncomment SYS_PTRACE when profiling with py-spy from outside the container.
+    # cap_add:
+    #   - SYS_PTRACE
     ports:
       - "8080:8080"
     devices:

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Metrics — vibeFrame{% endblock %}
+{% macro col(key, label) -%}
+  <a href="?sort={{ key }}" class="{% if sort == key %}active{% endif %}">{{ label }}{% if sort == key %} ▼{% endif %}</a>
+{%- endmacro %}
+{% block body %}
+<h2>Metrics
+  <form action="/metrics/clear" method="post" style="display:inline; margin-left:1rem;">
+    <button type="submit" class="secondary">Reset</button>
+  </form>
+</h2>
+<p class="muted">Lifetime count + last-256-sample window. Rows with p95 &gt; 1s are highlighted.</p>
+{% if not rows %}
+<p>No metrics recorded yet. Trigger some traffic and refresh.</p>
+{% else %}
+<table class="metrics">
+  <thead>
+    <tr>
+      <th>{{ col('name', 'Stage') }}</th>
+      <th>{{ col('count', 'Count') }}</th>
+      <th>{{ col('mean_ms', 'Mean (ms)') }}</th>
+      <th>{{ col('p50_ms', 'p50 (ms)') }}</th>
+      <th>{{ col('p95_ms', 'p95 (ms)') }}</th>
+      <th>{{ col('max_ms', 'Max (ms)') }}</th>
+      <th>{{ col('last_ms', 'Last (ms)') }}</th>
+      <th>{{ col('total_seconds', 'Total (s)') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr class="{% if r.p95_ms > 1000 %}slow{% endif %}">
+      <td class="name">{{ r.name }}</td>
+      <td>{{ r.count }}</td>
+      <td>{{ '%.2f'|format(r.mean_ms) }}</td>
+      <td>{{ '%.2f'|format(r.p50_ms) }}</td>
+      <td>{{ '%.2f'|format(r.p95_ms) }}</td>
+      <td>{{ '%.2f'|format(r.max_ms) }}</td>
+      <td>{{ '%.2f'|format(r.last_ms) }}</td>
+      <td>{{ '%.2f'|format(r.total_seconds) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

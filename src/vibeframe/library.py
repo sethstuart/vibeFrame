@@ -18,6 +18,7 @@ from vibeframe.db import (
     image_count,
     upsert_images,
 )
+from vibeframe.timing import record, timed
 
 log = logging.getLogger(__name__)
 
@@ -49,31 +50,38 @@ class ImageLibrary:
         Skips re-hashing files whose (mtime, size) matches the DB — sha256
         over NFS is the dominant cost in a periodic rescan.
         """
-        with self._lock:
-            paths = self._walk()
-            existing = get_existing_index(self.engine)
+        with self._lock, timed("library.scan"):
+            with timed("library.scan.walk"):
+                paths = self._walk()
+            with timed("library.scan.db_index"):
+                existing = get_existing_index(self.engine)
             rows = []
             rehashed = 0
-            for p in paths:
-                try:
-                    stat = p.stat()
-                except FileNotFoundError:
-                    continue
-                key = str(p)
-                prior = existing.get(key)
-                if prior and prior[0] == stat.st_mtime and prior[1] == stat.st_size:
-                    sha = prior[2]
-                else:
-                    sha = file_sha256(p)
-                    rehashed += 1
-                rows.append({
-                    "path": key,
-                    "sha256": sha,
-                    "mtime": stat.st_mtime,
-                    "size": stat.st_size,
-                })
-            upsert_images(self.engine, rows)
-            self._prune_missing({str(p) for p in paths})
+            with timed("library.scan.stat_loop"):
+                for p in paths:
+                    try:
+                        stat = p.stat()
+                    except FileNotFoundError:
+                        continue
+                    key = str(p)
+                    prior = existing.get(key)
+                    if prior and prior[0] == stat.st_mtime and prior[1] == stat.st_size:
+                        sha = prior[2]
+                    else:
+                        with timed("library.scan.hash_one"):
+                            sha = file_sha256(p)
+                        rehashed += 1
+                    rows.append({
+                        "path": key,
+                        "sha256": sha,
+                        "mtime": stat.st_mtime,
+                        "size": stat.st_size,
+                    })
+            with timed("library.scan.db_upsert"):
+                upsert_images(self.engine, rows)
+            with timed("library.scan.prune"):
+                self._prune_missing({str(p) for p in paths})
+            record("library.scan.rehashed_count", float(rehashed))
             log.info(
                 "library scan complete: %d images under %s (rehashed %d)",
                 len(rows),

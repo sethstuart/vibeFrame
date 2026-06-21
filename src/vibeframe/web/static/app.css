@@ -70,6 +70,16 @@ main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
 
 h2 .count { color: var(--muted); font-weight: normal; font-size: .9rem; margin-left: .5rem; }
 
+table.metrics { width: 100%; border-collapse: collapse; font-size: .85rem; }
+table.metrics th, table.metrics td { padding: .35rem .5rem; text-align: right; border-bottom: 1px solid var(--border); }
+table.metrics th { background: #fff; position: sticky; top: 0; font-weight: 600; }
+table.metrics th a { color: var(--accent); text-decoration: none; }
+table.metrics th a.active { color: var(--fg); }
+table.metrics td.name, table.metrics th:first-child { text-align: left; font-family: ui-monospace, monospace; }
+table.metrics tr.slow td { background: #fff4e5; }
+.muted { color: var(--muted); }
+button.secondary { padding: .25rem .5rem; background: #fff; color: var(--fg); border: 1px solid var(--border); border-radius: 3px; font-size: .85rem; cursor: pointer; }
+
 form label { display: block; margin-bottom: 1rem; }
 form input, form select { display: block; margin-top: .25rem; padding: .35rem; min-width: 200px; }
 form button { padding: .5rem 1rem; background: var(--accent); color: #fff; border: 0; border-radius: 3px; cursor: pointer; }

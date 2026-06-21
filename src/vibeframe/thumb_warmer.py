@@ -11,6 +11,7 @@ from PIL import Image, ImageOps
 
 from vibeframe.config import Settings
 from vibeframe.library import ImageLibrary
+from vibeframe.timing import record, timed
 
 log = logging.getLogger(__name__)
 
@@ -25,12 +26,13 @@ def thumb_cache_path(settings: Settings, src: Path) -> Path:
 
 
 def generate_thumb(src: Path) -> bytes:
-    with Image.open(src) as raw:
-        oriented = ImageOps.exif_transpose(raw).convert("RGB")
-        oriented.thumbnail((THUMB_MAX_SIDE, THUMB_MAX_SIDE), Image.Resampling.LANCZOS)
-        buf = io.BytesIO()
-        oriented.save(buf, format="JPEG", quality=THUMB_QUALITY)
-        return buf.getvalue()
+    with timed("thumb.generate"):
+        with Image.open(src) as raw:
+            oriented = ImageOps.exif_transpose(raw).convert("RGB")
+            oriented.thumbnail((THUMB_MAX_SIDE, THUMB_MAX_SIDE), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            oriented.save(buf, format="JPEG", quality=THUMB_QUALITY)
+            return buf.getvalue()
 
 
 class ThumbWarmer:
@@ -102,6 +104,8 @@ class ThumbWarmer:
                 continue
             generated += 1
         elapsed = time.monotonic() - started
+        record("thumb.warm_pass.seconds", elapsed)
+        record("thumb.warm_pass.generated", float(generated))
         if generated or skipped:
             log.info(
                 "thumb warm pass: generated=%d, cached=%d, elapsed=%.1fs",

@@ -27,15 +27,26 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 
 ARG INSTALL_RPI=1
+ARG INSTALL_PROFILE=0
 RUN pip install --upgrade pip && \
-    if [ "$INSTALL_RPI" = "1" ]; then \
+    EXTRAS="" && \
+    if [ "$INSTALL_RPI" = "1" ]; then EXTRAS="$EXTRAS rpi"; fi && \
+    if [ "$INSTALL_PROFILE" = "1" ]; then EXTRAS="$EXTRAS profile"; fi && \
+    SPEC="." && \
+    if [ -n "$EXTRAS" ]; then \
+        EX_LIST=$(echo "$EXTRAS" | tr ' ' ','); \
+        SPEC=".[$EX_LIST]"; \
+    fi && \
+    NEEDS_TOOLCHAIN=0 && \
+    if [ "$INSTALL_RPI" = "1" ]; then NEEDS_TOOLCHAIN=1; fi && \
+    if [ "$NEEDS_TOOLCHAIN" = "1" ]; then \
         apt-get update && \
         apt-get install -y --no-install-recommends build-essential python3-dev && \
-        pip install ".[rpi]" && \
+        pip install "$SPEC" && \
         apt-get purge -y --auto-remove build-essential python3-dev && \
         rm -rf /var/lib/apt/lists/*; \
     else \
-        pip install "."; \
+        pip install "$SPEC"; \
     fi
 
 USER vibeframe

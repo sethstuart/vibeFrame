@@ -7,6 +7,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from vibeframe.timing import timed
+
 log = logging.getLogger(__name__)
 
 
@@ -29,13 +31,14 @@ class MockDriver:
         )
 
     def show(self, image: Image.Image) -> None:
-        framed = image
-        if self.orientation:
-            framed = framed.rotate(self.orientation, expand=True)
-        if framed.size != (self.width, self.height):
-            framed = framed.resize((self.width, self.height), Image.Resampling.LANCZOS)
-        rgb = framed.convert("RGB")
-        ts = int(time.time())
-        with self._lock:
-            rgb.save(self.output_dir / f"frame-{ts}.png")
-            rgb.save(self.output_dir / "current.png")
+        with timed("driver.mock.show"):
+            framed = image
+            if self.orientation:
+                framed = framed.rotate(self.orientation, expand=True)
+            if framed.size != (self.width, self.height):
+                framed = framed.resize((self.width, self.height), Image.Resampling.LANCZOS)
+            rgb = framed.convert("RGB")
+            ts = int(time.time())
+            with self._lock:
+                rgb.save(self.output_dir / f"frame-{ts}.png")
+                rgb.save(self.output_dir / "current.png")

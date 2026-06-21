@@ -149,6 +149,76 @@ One Python process, one asyncio loop. The Inky SPI driver is not thread-safe, so
 
 ---
 
+## Profiling
+
+vibeFrame has built-in lightweight timing for every hot path and a synthetic
+load harness for capturing clean numbers without waiting for real traffic.
+
+### Live metrics
+
+Every request and every background stage records into in-memory ring buffers
+(last 256 samples each, lifetime counters). View them at:
+
+- `http://<host>:8080/metrics.html` — sortable table, slow rows highlighted
+- `GET /metrics` — JSON for scripting
+- `POST /metrics/clear` — reset (useful before reproducing a slow case)
+
+Stage names you'll see:
+
+| Prefix | What it measures |
+|---|---|
+| `http.GET./...`, `http.POST./...` | Per-route HTTP duration (matched route, not URL) |
+| `pipeline.process.hit` / `.miss` | End-to-end image processing, split by cache result |
+| `pipeline.image.open`, `pipeline.crop.<mode>`, `pipeline.dither.<algo>`, `pipeline.cache.write`, ... | Individual pipeline stages |
+| `library.scan` and `library.scan.*` | Scan total + walk/stat/hash/db sub-stages |
+| `library.scan.rehashed_count` | How many files actually needed re-hashing (not a duration; recorded as a value) |
+| `thumb.generate`, `thumb.warm_pass.seconds` | Thumbnail work |
+| `driver.inky.prepare` / `.set_image` / `.show` | Display driver phases (Spectra 6 physical refresh is `driver.inky.show`) |
+| `scheduler.step.total`, `scheduler.pick_next` | Scheduler timings |
+
+### Synthetic bench
+
+```sh
+docker exec -it vibeframe python -m vibeframe.bench --from /vibeFrame --pick 10 --runs 3
+```
+
+Or against synthetic photos (works in any environment):
+
+```sh
+python -m vibeframe.bench --photos 50 --pick 10 --runs 3
+```
+
+Times each stage cold (empty cache) and warm (cache hits), reports a markdown
+table. Add `--metrics-url http://localhost:8080/metrics` to also dump the live
+container's accumulated metrics.
+
+### Deep profiling with py-spy
+
+For looking inside opaque native calls (PIL, OpenCV, libgpiod) where the
+in-app metrics see only a single stage.
+
+1. Rebuild with the profile extra:
+   ```sh
+   docker compose build --build-arg INSTALL_PROFILE=1
+   ```
+2. Add `SYS_PTRACE` to `docker-compose.yml` (commented line included) and
+   `docker compose up -d`.
+3. Attach:
+   ```sh
+   # Live top view, ctrl-C to exit
+   docker exec -it vibeframe py-spy top --pid 1
+
+   # 60s flame-graph-style record
+   docker exec vibeframe py-spy record -o /tmp/profile.svg --pid 1 --duration 60
+   docker cp vibeframe:/tmp/profile.svg ./profile.svg
+
+   # One-shot stack dump of every thread (great for "why is it hung")
+   docker exec vibeframe py-spy dump --pid 1
+   ```
+
+Drop `SYS_PTRACE` when you're done — it lets the container read other
+processes' memory, which you don't want in normal operation.
+
 ## Roadmap / not yet implemented
 
 - Hardware button support (Inky's A/B/C/D) via `gpiozero`.

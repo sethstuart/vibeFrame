@@ -14,6 +14,7 @@ from vibeframe.db import record_show
 from vibeframe.display.base import DisplayDriver
 from vibeframe.library import ImageLibrary
 from vibeframe.processor.pipeline import process
+from vibeframe.timing import record, timed
 
 log = logging.getLogger(__name__)
 
@@ -91,13 +92,17 @@ class Scheduler:
             self.kick.clear()
 
     async def _step(self) -> None:
+        from time import perf_counter
+
+        step_start = perf_counter()
         tz: ZoneInfo = self.settings.zoneinfo
         now_local = datetime.now(tz=tz)
         if is_quiet(now_local, self.settings.quiet_start, self.settings.quiet_end):
             log.debug("inside quiet hours; skipping refresh")
             return
 
-        image_id = _pick_next(self.library, self.settings.selection_mode, self._last_path)
+        with timed("scheduler.pick_next"):
+            image_id = _pick_next(self.library, self.settings.selection_mode, self._last_path)
         if image_id is None:
             log.info("no images available to display")
             return
@@ -118,6 +123,7 @@ class Scheduler:
         record_show(self.engine, image_id)
         self._last_path = img.path
         self._last_shown_at = datetime.now(UTC)
+        record("scheduler.step.total", perf_counter() - step_start)
         log.info("displayed %s", img.path)
 
     def stop(self) -> None:

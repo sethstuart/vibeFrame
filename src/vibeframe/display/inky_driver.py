@@ -5,6 +5,8 @@ import threading
 
 from PIL import Image
 
+from vibeframe.timing import timed
+
 log = logging.getLogger(__name__)
 
 # Known gpiochip labels for Pi 4 (BCM2711) and Pi 5 (RP1). gpiodevice tries
@@ -59,12 +61,15 @@ class InkyDriver:
         )
 
     def show(self, image: Image.Image) -> None:
-        framed = image
-        if self.orientation:
-            framed = framed.rotate(self.orientation, expand=True)
-        if framed.size != (self.width, self.height):
-            framed = framed.resize((self.width, self.height), Image.Resampling.LANCZOS)
-        framed = framed.convert("RGB")
+        with timed("driver.inky.prepare"):
+            framed = image
+            if self.orientation:
+                framed = framed.rotate(self.orientation, expand=True)
+            if framed.size != (self.width, self.height):
+                framed = framed.resize((self.width, self.height), Image.Resampling.LANCZOS)
+            framed = framed.convert("RGB")
         with self._lock:
-            self._inky.set_image(framed)
-            self._inky.show()
+            with timed("driver.inky.set_image"):
+                self._inky.set_image(framed)
+            with timed("driver.inky.show"):
+                self._inky.show()
