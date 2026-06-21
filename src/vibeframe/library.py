@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+import logging
+import threading
+from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path
+
+from sqlmodel import Session, select
+
+from vibeframe.cache import Cache, file_sha256
+from vibeframe.db import Favorite, History, Image, delete_image_by_path, upsert_images
+
+log = logging.getLogger(__name__)
+
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff"}
+
+
+@dataclass(frozen=True)
+class LibraryImage:
+    id: int
+    path: Path
+    sha256: str
+
+
+def _is_image(p: Path) -> bool:
+    return p.is_file() and p.suffix.lower() in IMAGE_EXTS
+
+
+class ImageLibrary:
+    def __init__(self, root: Path, engine, recursive: bool = True, cache: Cache | None = None) -> None:
+        self.root = root
+        self.engine = engine
+        self.recursive = recursive
+        self.cache = cache
+        self._lock = threading.RLock()
+
+    def scan(self) -> int:
+        """Walk the root and upsert all images. Returns the count seen."""
+        with self._lock:
+            paths = self._walk()
+            rows = []
+            for p in paths:
+                try:
+                    stat = p.stat()
+                except FileNotFoundError:
+                    continue
+                rows.append({
+                    "path": str(p),
+                    "sha256": file_sha256(p),
+                    "mtime": stat.st_mtime,
+                })
+            upsert_images(self.engine, rows)
+            self._prune_missing({str(p) for p in paths})
+            log.info("library scan complete: %d images under %s", len(rows), self.root)
+            return len(rows)
+
+    def _walk(self) -> list[Path]:
+        if not self.root.is_dir():
+            return []
+        glob = "**/*" if self.recursive else "*"
+        return [p for p in self.root.glob(glob) if _is_image(p)]
+
+    def _prune_missing(self, present_paths: set[str]) -> None:
+        with Session(self.engine) as session:
+            stored = session.exec(select(Image)).all()
+            for img in stored:
+                if img.path not in present_paths:
+                    sha = delete_image_by_path(self.engine, img.path)
+                    if sha and self.cache:
+                        self.cache.invalidate_source(sha)
+
+    def add_path(self, path: Path) -> None:
+        with self._lock:
+            if not _is_image(path):
+                return
+            try:
+                stat = path.stat()
+            except FileNotFoundError:
+                return
+            upsert_images(
+                self.engine,
+                [{"path": str(path), "sha256": file_sha256(path), "mtime": stat.st_mtime}],
+            )
+
+    def remove_path(self, path: Path) -> None:
+        with self._lock:
+            sha = delete_image_by_path(self.engine, str(path))
+            if sha and self.cache:
+                self.cache.invalidate_source(sha)
+
+    def list(self, limit: int = 200, offset: int = 0, favorites_only: bool = False) -> list[Image]:
+        with Session(self.engine) as session:
+            stmt = select(Image)
+            if favorites_only:
+                stmt = stmt.join(Favorite, Favorite.image_id == Image.id)
+            stmt = stmt.order_by(Image.added_at.desc()).offset(offset).limit(limit)
+            return list(session.exec(stmt))
+
+    def get(self, image_id: int) -> Image | None:
+        with Session(self.engine) as session:
+            return session.get(Image, image_id)
+
+    def all_ids(self, favorites_only: bool = False) -> list[int]:
+        with Session(self.engine) as session:
+            if favorites_only:
+                stmt = select(Image.id).join(Favorite, Favorite.image_id == Image.id)
+            else:
+                stmt = select(Image.id)
+            return list(session.exec(stmt))
+
+    def recent_ids(self, limit: int) -> list[int]:
+        with Session(self.engine) as session:
+            stmt = select(Image.id).order_by(Image.added_at.desc()).limit(limit)
+            return list(session.exec(stmt))
+
+    def toggle_favorite(self, image_id: int) -> bool:
+        with Session(self.engine) as session:
+            existing = session.get(Favorite, image_id)
+            if existing:
+                session.delete(existing)
+                session.commit()
+                return False
+            session.add(Favorite(image_id=image_id))
+            session.commit()
+            return True
+
+    def is_favorite(self, image_id: int) -> bool:
+        with Session(self.engine) as session:
+            return session.get(Favorite, image_id) is not None
+
+    def last_shown(self, limit: int = 10) -> Iterable[tuple[int, str]]:
+        with Session(self.engine) as session:
+            rows = session.exec(
+                select(History, Image).join(Image, Image.id == History.image_id)
+                .order_by(History.shown_at.desc()).limit(limit)
+            )
+            for _hist, img in rows:
+                yield (img.id, img.path)

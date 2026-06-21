@@ -1,0 +1,22 @@
+services:
+  vibeframe:
+    build:
+      context: .
+      args:
+        INSTALL_RPI: "0"
+    image: vibeframe:dev
+    container_name: vibeframe-dev
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      VIBEFRAME_DRIVER: mock
+      VIBEFRAME_PHOTOS_DIR: /photos
+      VIBEFRAME_CACHE_DIR: /var/cache/vibeframe
+      VIBEFRAME_STATE_DIR: /var/lib/vibeframe
+      VIBEFRAME_REFRESH_SECONDS: "30"
+      VIBEFRAME_LOG_LEVEL: DEBUG
+    volumes:
+      - ./dev/photos:/photos
+      - ./dev/state:/var/lib/vibeframe
+      - ./dev/cache:/var/cache/vibeframe

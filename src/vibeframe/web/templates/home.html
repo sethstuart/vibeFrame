@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block body %}
+<section class="now-showing">
+  <h2>Now showing</h2>
+  {% if last_id %}
+    <img src="/images/{{ last_id }}/preview.png" alt="current image preview" class="display-preview" />
+    <p class="path">{{ last_path }}</p>
+    <p class="when">Shown at: {{ last_shown_at }}</p>
+  {% else %}
+    <p>No image displayed yet.</p>
+  {% endif %}
+  <form hx-post="/system/next" hx-swap="none">
+    <button type="submit">Show next now</button>
+  </form>
+  {% if in_quiet %}
+    <p class="quiet">Currently in quiet hours ({{ s.quiet_start }} – {{ s.quiet_end }} {{ s.tz }}).</p>
+  {% else %}
+    <p>Next refresh in up to {{ s.refresh_seconds }} seconds.</p>
+  {% endif %}
+</section>
+
+<section class="upload">
+  <h2>Upload</h2>
+  <form action="/images/upload" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" accept="image/*" required />
+    <button type="submit">Upload to NFS</button>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>{% if favorites_only %}Favorites{% else %}Library{% endif %}</h2>
+<div class="grid">
+  {% for img in images %}
+    <figure class="card">
+      <img src="/images/{{ img.id }}/thumb.png" alt="{{ img.path }}" loading="lazy" />
+      <figcaption>
+        <span class="filename">{{ img.path.split('/')[-1] }}</span>
+        <div class="actions">
+          {% if img.id in favorite_ids %}
+            <button hx-delete="/favorites/{{ img.id }}" hx-swap="none">★ Unfavorite</button>
+          {% else %}
+            <button hx-post="/favorites/{{ img.id }}" hx-swap="none">☆ Favorite</button>
+          {% endif %}
+          <a href="/images/{{ img.id }}/preview.png" target="_blank">Preview</a>
+          <button hx-delete="/images/{{ img.id }}" hx-swap="none"
+                  hx-confirm="Delete {{ img.path }} from NFS?">Delete</button>
+        </div>
+      </figcaption>
+    </figure>
+  {% else %}
+    <p>No images.</p>
+  {% endfor %}
+</div>
+<nav class="pager">
+  {% if offset > 0 %}<a href="?offset={{ [offset - limit, 0]|max }}&limit={{ limit }}{% if favorites_only %}&favorites_only=true{% endif %}">← Prev</a>{% endif %}
+  {% if images|length == limit %}<a href="?offset={{ offset + limit }}&limit={{ limit }}{% if favorites_only %}&favorites_only=true{% endif %}">Next →</a>{% endif %}
+</nav>
+{% endblock %}

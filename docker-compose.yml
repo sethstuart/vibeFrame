@@ -1,0 +1,28 @@
+services:
+  vibeframe:
+    image: ghcr.io/sethstuart/vibeframe:latest
+    container_name: vibeframe
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    devices:
+      - "/dev/spidev0.0:/dev/spidev0.0"
+      - "/dev/spidev0.1:/dev/spidev0.1"
+      - "/dev/i2c-1:/dev/i2c-1"
+      - "/dev/gpiochip0:/dev/gpiochip0"
+    group_add:
+      - "spi"
+      - "gpio"
+      - "i2c"
+    volumes:
+      # Host-mounted NFS share goes here. Mount on the Pi with fstab or systemd.mount,
+      # then bind the mountpoint in. Example fstab line:
+      #   nas:/photos /mnt/nas/photos nfs ro,vers=4.1,bg,soft,timeo=100 0 0
+      - /mnt/nas/photos:/photos
+      - vibeframe-state:/var/lib/vibeframe
+      - vibeframe-cache:/var/cache/vibeframe
+    env_file: .env
+
+volumes:
+  vibeframe-state:
+  vibeframe-cache:

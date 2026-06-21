@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>Settings</h2>
+<form method="post" action="/settings">
+  <label>Orientation
+    <select name="orientation">
+      {% for opt in [0, 90, 180, 270] %}
+        <option value="{{ opt }}" {% if s.orientation == opt %}selected{% endif %}>{{ opt }}°</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Refresh interval (seconds)
+    <input type="number" name="refresh_seconds" min="10" value="{{ s.refresh_seconds }}" />
+  </label>
+
+  <label>Selection mode
+    <select name="selection_mode">
+      {% for opt in ["shuffle", "sequential", "favorites", "recent"] %}
+        <option value="{{ opt }}" {% if s.selection_mode == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Dither
+    <select name="dither">
+      {% for opt in ["floyd-steinberg", "atkinson", "bayer", "none"] %}
+        <option value="{{ opt }}" {% if s.dither == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Crop mode
+    <select name="crop_mode">
+      {% for opt in ["smart", "center", "fit"] %}
+        <option value="{{ opt }}" {% if s.crop_mode == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Saturation
+    <input type="number" step="0.05" min="0" max="3" name="saturation" value="{{ s.saturation }}" />
+  </label>
+
+  <label>Contrast
+    <input type="number" step="0.05" min="0" max="3" name="contrast" value="{{ s.contrast }}" />
+  </label>
+
+  <label>Quiet hours start ({{ s.tz }})
+    <input type="time" name="quiet_start" value="{{ s.quiet_start.strftime('%H:%M') }}" />
+  </label>
+
+  <label>Quiet hours end ({{ s.tz }})
+    <input type="time" name="quiet_end" value="{{ s.quiet_end.strftime('%H:%M') }}" />
+  </label>
+
+  <button type="submit">Save</button>
+</form>
+{% endblock %}
