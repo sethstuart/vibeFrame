@@ -10,10 +10,13 @@ services:
       - "/dev/spidev0.1:/dev/spidev0.1"
       - "/dev/i2c-1:/dev/i2c-1"
       - "/dev/gpiochip0:/dev/gpiochip0"
+    # Numeric GIDs from the Pi host (group_add resolves names against the
+    # container's /etc/group, not the host, so we pass IDs directly).
+    # Verify on your Pi with: getent group spi gpio i2c
     group_add:
-      - "spi"
-      - "gpio"
-      - "i2c"
+      - "989"  # spi
+      - "986"  # gpio
+      - "988"  # i2c
     volumes:
       # Host-mounted NFS share goes here. Mount on the Pi with fstab or systemd.mount,
       # then bind the mountpoint in. Example fstab line:
