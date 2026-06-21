@@ -3,9 +3,10 @@
 <section class="now-showing">
   <h2>Now showing</h2>
   {% if last_id %}
-    <img src="/images/{{ last_id }}/preview.png" alt="current image preview" class="display-preview" />
+    <img src="/images/{{ last_id }}/thumb.png" alt="current image" class="display-preview" loading="lazy" />
     <p class="path">{{ last_path }}</p>
     <p class="when">Shown at: {{ last_shown_at }}</p>
+    <p><a href="/images/{{ last_id }}/preview.png" target="_blank">View full panel render</a></p>
   {% else %}
     <p>No image displayed yet.</p>
   {% endif %}

@@ -9,7 +9,15 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from vibeframe.cache import Cache, file_sha256
-from vibeframe.db import Favorite, History, Image, delete_image_by_path, upsert_images
+from vibeframe.db import (
+    Favorite,
+    History,
+    Image,
+    delete_image_by_path,
+    get_existing_index,
+    image_count,
+    upsert_images,
+)
 
 log = logging.getLogger(__name__)
 
@@ -36,23 +44,42 @@ class ImageLibrary:
         self._lock = threading.RLock()
 
     def scan(self) -> int:
-        """Walk the root and upsert all images. Returns the count seen."""
+        """Walk the root and upsert all images. Returns the count seen.
+
+        Skips re-hashing files whose (mtime, size) matches the DB — sha256
+        over NFS is the dominant cost in a periodic rescan.
+        """
         with self._lock:
             paths = self._walk()
+            existing = get_existing_index(self.engine)
             rows = []
+            rehashed = 0
             for p in paths:
                 try:
                     stat = p.stat()
                 except FileNotFoundError:
                     continue
+                key = str(p)
+                prior = existing.get(key)
+                if prior and prior[0] == stat.st_mtime and prior[1] == stat.st_size:
+                    sha = prior[2]
+                else:
+                    sha = file_sha256(p)
+                    rehashed += 1
                 rows.append({
-                    "path": str(p),
-                    "sha256": file_sha256(p),
+                    "path": key,
+                    "sha256": sha,
                     "mtime": stat.st_mtime,
+                    "size": stat.st_size,
                 })
             upsert_images(self.engine, rows)
             self._prune_missing({str(p) for p in paths})
-            log.info("library scan complete: %d images under %s", len(rows), self.root)
+            log.info(
+                "library scan complete: %d images under %s (rehashed %d)",
+                len(rows),
+                self.root,
+                rehashed,
+            )
             return len(rows)
 
     def _walk(self) -> list[Path]:
@@ -80,8 +107,16 @@ class ImageLibrary:
                 return
             upsert_images(
                 self.engine,
-                [{"path": str(path), "sha256": file_sha256(path), "mtime": stat.st_mtime}],
+                [{
+                    "path": str(path),
+                    "sha256": file_sha256(path),
+                    "mtime": stat.st_mtime,
+                    "size": stat.st_size,
+                }],
             )
+
+    def count(self, favorites_only: bool = False) -> int:
+        return image_count(self.engine, favorites_only=favorites_only)
 
     def remove_path(self, path: Path) -> None:
         with self._lock:

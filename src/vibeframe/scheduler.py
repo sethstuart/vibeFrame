@@ -108,7 +108,7 @@ class Scheduler:
         try:
             loop = asyncio.get_running_loop()
             processed = await loop.run_in_executor(
-                None, process, Path(img.path), self.settings, self.cache
+                None, process, Path(img.path), self.settings, self.cache, img.sha256
             )
             await loop.run_in_executor(None, self.driver.show, processed.image)
         except Exception:

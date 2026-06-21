@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import io
 import shutil
 import time
@@ -11,23 +10,50 @@ from fastapi.responses import HTMLResponse, Response
 
 from vibeframe.library import IMAGE_EXTS
 from vibeframe.processor.pipeline import process
+from vibeframe.thumb_warmer import generate_thumb, thumb_cache_path
 from vibeframe.web.deps import AppState, get_state, require_token
 
-THUMB_MAX_SIDE = 320
-THUMB_QUALITY = 80
 THUMB_CACHE_HEADERS = {"Cache-Control": "public, max-age=86400"}
 
 router = APIRouter(prefix="/images", tags=["images"])
+
+
+PAGE_SIZE_DEFAULT = 24
+PAGE_SIZE_MAX = 200
+
+
+def _page_numbers(current: int, total: int, window: int = 2) -> list[int | None]:
+    """Numbered pagination with ellipses (None) for gaps. window = neighbours each side."""
+    if total <= 1:
+        return [1] if total == 1 else []
+    pages: set[int] = {1, total, current}
+    for d in range(1, window + 1):
+        pages.add(current - d)
+        pages.add(current + d)
+    ordered = sorted(p for p in pages if 1 <= p <= total)
+    out: list[int | None] = []
+    prev = 0
+    for p in ordered:
+        if p != prev + 1 and prev != 0:
+            out.append(None)
+        out.append(p)
+        prev = p
+    return out
 
 
 @router.get("", response_class=HTMLResponse)
 async def list_images(
     request: Request,
     favorites_only: bool = False,
-    limit: int = 60,
+    limit: int = PAGE_SIZE_DEFAULT,
     offset: int = 0,
     state: AppState = Depends(get_state),
 ):
+    limit = max(1, min(limit, PAGE_SIZE_MAX))
+    offset = max(0, offset)
+    total = state.library.count(favorites_only=favorites_only)
+    total_pages = max(1, (total + limit - 1) // limit) if total else 1
+    current_page = offset // limit + 1
     images = state.library.list(limit=limit, offset=offset, favorites_only=favorites_only)
     favorite_ids = set(state.library.all_ids(favorites_only=True))
     return request.app.state.templates.TemplateResponse(
@@ -39,6 +65,10 @@ async def list_images(
             "favorites_only": favorites_only,
             "offset": offset,
             "limit": limit,
+            "total": total,
+            "current_page": current_page,
+            "total_pages": total_pages,
+            "page_numbers": _page_numbers(current_page, total_pages),
         },
     )
 
@@ -79,7 +109,7 @@ def preview(image_id: int, state: AppState = Depends(get_state)):
     img = state.library.get(image_id)
     if not img:
         raise HTTPException(status_code=404, detail="not found")
-    processed = process(Path(img.path), state.settings, state.cache)
+    processed = process(Path(img.path), state.settings, state.cache, img.sha256)
     buf = io.BytesIO()
     processed.image.convert("RGB").save(buf, format="PNG")
     return Response(
@@ -87,36 +117,23 @@ def preview(image_id: int, state: AppState = Depends(get_state)):
     )
 
 
-def _thumb_cache_path(state: AppState, src: Path) -> Path:
-    stat = src.stat()
-    key = hashlib.sha256(f"{src}|{stat.st_mtime_ns}|{stat.st_size}".encode()).hexdigest()
-    return state.settings.cache_dir / "thumbs" / f"{key}.jpg"
-
-
 @router.get("/{image_id}/thumb.png")
 def thumb(image_id: int, state: AppState = Depends(get_state)):
-    from PIL import Image as PILImage
-    from PIL import ImageOps
-
     img = state.library.get(image_id)
     if not img:
         raise HTTPException(status_code=404, detail="not found")
     src_path = Path(img.path)
-    cached = _thumb_cache_path(state, src_path)
+    try:
+        cached = thumb_cache_path(state.settings, src_path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     if cached.is_file():
         return Response(
             content=cached.read_bytes(),
             media_type="image/jpeg",
             headers=THUMB_CACHE_HEADERS,
         )
-
-    with PILImage.open(src_path) as src:
-        src = ImageOps.exif_transpose(src).convert("RGB")
-        src.thumbnail((THUMB_MAX_SIDE, THUMB_MAX_SIDE), PILImage.Resampling.LANCZOS)
-        buf = io.BytesIO()
-        src.save(buf, format="JPEG", quality=THUMB_QUALITY)
-
-    data = buf.getvalue()
+    data = generate_thumb(src_path)
     try:
         cached.parent.mkdir(parents=True, exist_ok=True)
         cached.write_bytes(data)

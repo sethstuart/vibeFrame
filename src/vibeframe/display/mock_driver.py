@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from pathlib import Path
 
@@ -18,6 +19,7 @@ class MockDriver:
         self.width = width
         self.height = height
         self.orientation = orientation
+        self._lock = threading.Lock()
         log.info(
             "mock display active: writing PNGs to %s (size=%sx%s, orientation=%s)",
             self.output_dir,
@@ -34,5 +36,6 @@ class MockDriver:
             framed = framed.resize((self.width, self.height), Image.Resampling.LANCZOS)
         rgb = framed.convert("RGB")
         ts = int(time.time())
-        rgb.save(self.output_dir / f"frame-{ts}.png")
-        rgb.save(self.output_dir / "current.png")
+        with self._lock:
+            rgb.save(self.output_dir / f"frame-{ts}.png")
+            rgb.save(self.output_dir / "current.png")

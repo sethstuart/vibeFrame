@@ -42,6 +42,53 @@ def test_remove_path_invalidates_cache(tmp_path: Path):
     assert not cache.has(CacheKey(img.sha256, "abc123"))
 
 
+def test_rescan_skips_rehash_when_stat_unchanged(tmp_path: Path, monkeypatch):
+    """Subsequent scans must NOT re-hash files whose mtime+size are unchanged."""
+    from vibeframe import library as library_mod
+
+    root = tmp_path / "photos"
+    root.mkdir()
+    _make_jpeg(root / "a.jpg")
+    _make_jpeg(root / "b.jpg")
+    engine = build_engine(tmp_path / "test.db")
+    lib = ImageLibrary(root, engine, recursive=False)
+    lib.scan()
+
+    calls = {"n": 0}
+    original = library_mod.file_sha256
+
+    def counting(p):
+        calls["n"] += 1
+        return original(p)
+
+    monkeypatch.setattr(library_mod, "file_sha256", counting)
+    lib.scan()
+    assert calls["n"] == 0, "unchanged files should not be re-hashed"
+
+
+def test_pipeline_accepts_precomputed_sha(tmp_path: Path):
+    """process() must not call file_sha256 when sha256 is supplied."""
+    from vibeframe.cache import Cache
+    from vibeframe.config import Settings
+    from vibeframe.processor import pipeline
+
+    src = tmp_path / "x.jpg"
+    _make_jpeg(src)
+    settings = Settings(
+        photos_dir=tmp_path,
+        cache_dir=tmp_path / "cache",
+        state_dir=tmp_path / "state",
+        driver="mock",
+    )
+    settings.ensure_dirs()
+    cache = Cache(settings.cache_dir, max_bytes=10_000_000)
+
+    p1 = pipeline.process(src, settings, cache, sha256="deadbeef")
+    assert p1.source_sha256 == "deadbeef"
+    p2 = pipeline.process(src, settings, cache, sha256="deadbeef")
+    assert p2.source_sha256 == "deadbeef"
+
+
 def test_toggle_favorite_round_trip(tmp_path: Path):
     root = tmp_path / "photos"
     root.mkdir()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 
 from PIL import Image
 
@@ -49,6 +50,7 @@ class InkyDriver:
         self.width = int(self._inky.width)
         self.height = int(self._inky.height)
         self.orientation = orientation
+        self._lock = threading.Lock()
         log.info(
             "inky display detected: %sx%s, orientation=%s",
             self.width,
@@ -62,5 +64,7 @@ class InkyDriver:
             framed = framed.rotate(self.orientation, expand=True)
         if framed.size != (self.width, self.height):
             framed = framed.resize((self.width, self.height), Image.Resampling.LANCZOS)
-        self._inky.set_image(framed.convert("RGB"))
-        self._inky.show()
+        framed = framed.convert("RGB")
+        with self._lock:
+            self._inky.set_image(framed)
+            self._inky.show()

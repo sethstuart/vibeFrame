@@ -14,6 +14,7 @@ from vibeframe.db import build_engine
 from vibeframe.display import build_driver
 from vibeframe.library import ImageLibrary
 from vibeframe.scheduler import Scheduler
+from vibeframe.thumb_warmer import ThumbWarmer
 from vibeframe.watcher import LibraryWatcher
 from vibeframe.web.app import create_app
 from vibeframe.web.deps import AppState
@@ -38,7 +39,10 @@ async def _serve() -> None:
     library = ImageLibrary(settings.photos_dir, engine, recursive=settings.recursive, cache=cache)
     library.scan()
 
-    watcher = LibraryWatcher(library)
+    warmer = ThumbWarmer(settings, library)
+    warmer.start()
+
+    watcher = LibraryWatcher(library, on_change=warmer.kick)
     watcher.start()
 
     driver = build_driver(settings)
@@ -79,6 +83,7 @@ async def _serve() -> None:
         scheduler.stop()
         await asyncio.gather(scheduler_task, return_exceptions=True)
         watcher.stop()
+        warmer.stop()
 
 
 def main() -> int:

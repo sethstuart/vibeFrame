@@ -1,6 +1,11 @@
 {% extends "base.html" %}
+{% macro page_url(page) -%}
+  ?offset={{ (page - 1) * limit }}&limit={{ limit }}{% if favorites_only %}&favorites_only=true{% endif %}
+{%- endmacro %}
 {% block body %}
-<h2>{% if favorites_only %}Favorites{% else %}Library{% endif %}</h2>
+<h2>{% if favorites_only %}Favorites{% else %}Library{% endif %}
+  <span class="count">({{ total }} {% if total == 1 %}image{% else %}images{% endif %})</span>
+</h2>
 <div class="grid">
   {% for img in images %}
     <figure class="card">
@@ -23,8 +28,20 @@
     <p>No images.</p>
   {% endfor %}
 </div>
+{% if total_pages > 1 %}
 <nav class="pager">
-  {% if offset > 0 %}<a href="?offset={{ [offset - limit, 0]|max }}&limit={{ limit }}{% if favorites_only %}&favorites_only=true{% endif %}">← Prev</a>{% endif %}
-  {% if images|length == limit %}<a href="?offset={{ offset + limit }}&limit={{ limit }}{% if favorites_only %}&favorites_only=true{% endif %}">Next →</a>{% endif %}
+  {% if current_page > 1 %}<a href="{{ page_url(current_page - 1) }}">← Prev</a>{% endif %}
+  {% for p in page_numbers %}
+    {% if p is none %}
+      <span class="gap">…</span>
+    {% elif p == current_page %}
+      <span class="current">{{ p }}</span>
+    {% else %}
+      <a href="{{ page_url(p) }}">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
+  {% if current_page < total_pages %}<a href="{{ page_url(current_page + 1) }}">Next →</a>{% endif %}
+  <span class="meta">Page {{ current_page }} of {{ total_pages }}</span>
 </nav>
+{% endif %}
 {% endblock %}

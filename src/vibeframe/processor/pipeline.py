@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageOps
 
-from vibeframe.cache import Cache, CacheKey, file_sha256, params_hash
+from vibeframe.cache import Cache, CacheKey, params_hash
 from vibeframe.config import Settings
 from vibeframe.processor import crop, dither, palette, tonemap
 
@@ -57,17 +57,32 @@ def _pipeline_params(settings: Settings, target_w: int, target_h: int) -> dict:
     }
 
 
-def process(path: Path, settings: Settings, cache: Cache | None = None) -> ProcessedImage:
-    """Run the full pipeline for one source image and return a display-ready PIL image."""
-    sha = file_sha256(path)
+def process(
+    path: Path,
+    settings: Settings,
+    cache: Cache | None = None,
+    sha256: str | None = None,
+) -> ProcessedImage:
+    """Run the full pipeline for one source image and return a display-ready PIL image.
+
+    If `sha256` is supplied (e.g. by the library, which already stores it), we use it
+    directly. Otherwise we fall back to (path, mtime, size) so the cache lookup never
+    requires reading the source file — only a missed lookup pays the decode cost.
+    """
     target_w, target_h = _target_size(settings.orientation)
     params = _pipeline_params(settings, target_w, target_h)
-    key = CacheKey(source_sha256=sha, params_hash=params_hash(params))
+
+    if sha256 is not None:
+        source_key = sha256
+    else:
+        stat = path.stat()
+        source_key = f"stat-{stat.st_mtime_ns}-{stat.st_size}"
+    key = CacheKey(source_sha256=source_key, params_hash=params_hash(params))
 
     if cache is not None:
         cached = cache.get(key)
         if cached is not None:
-            return ProcessedImage(path=path, image=Image.open(cached), source_sha256=sha)
+            return ProcessedImage(path=path, image=Image.open(cached), source_sha256=source_key)
 
     with Image.open(path) as img:
         img.load()
@@ -85,4 +100,4 @@ def process(path: Path, settings: Settings, cache: Cache | None = None) -> Proce
         out.save(buf, format="PNG")
         cache.put_bytes(key, buf.getvalue())
 
-    return ProcessedImage(path=path, image=out, source_sha256=sha)
+    return ProcessedImage(path=path, image=out, source_sha256=source_key)
