@@ -23,6 +23,10 @@ services:
       - /mnt/vibeFrame:/vibeFrame
       - vibeframe-state:/var/lib/vibeframe
       - vibeframe-cache:/var/cache/vibeframe
+      # Host devicetree — gpiodevice (used by inky) reads this to detect the
+      # Pi model and pick the right gpiochip. Without it, inky fails with
+      # "No compatible platform detected!" on first show().
+      - /sys/firmware/devicetree:/sys/firmware/devicetree:ro
     env_file: .env
 
 volumes:
