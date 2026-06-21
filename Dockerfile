@@ -29,7 +29,11 @@ COPY src ./src
 ARG INSTALL_RPI=1
 RUN pip install --upgrade pip && \
     if [ "$INSTALL_RPI" = "1" ]; then \
-        pip install ".[rpi]"; \
+        apt-get update && \
+        apt-get install -y --no-install-recommends build-essential python3-dev && \
+        pip install ".[rpi]" && \
+        apt-get purge -y --auto-remove build-essential python3-dev && \
+        rm -rf /var/lib/apt/lists/*; \
     else \
         pip install "."; \
     fi
