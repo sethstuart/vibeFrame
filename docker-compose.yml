@@ -23,12 +23,11 @@ services:
       - /mnt/vibeFrame:/vibeFrame
       - vibeframe-state:/var/lib/vibeframe
       - vibeframe-cache:/var/cache/vibeframe
-      # Overlay the host's full sysfs read-only so the container can resolve
-      # the /proc/device-tree symlink (which targets /sys/firmware/devicetree
-      # /base — hidden from the default filtered container sysfs view).
-      # gpiodevice (used by inky) reads /proc/device-tree/compatible to
-      # detect the Pi model. Read-only is the smallest privilege needed.
-      - /sys:/sys:ro
+      # Note: no /proc/device-tree or /sys mount needed. gpiodevice's
+      # platform detection (which reads /proc/device-tree/compatible) is
+      # patched in src/vibeframe/display/inky_driver.py to fall back to
+      # known Pi 4/5 gpiochip labels when the devicetree isn't visible —
+      # sidestepping the container's sysfs sandbox entirely.
     env_file: .env
 
 volumes:
