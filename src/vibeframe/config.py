@@ -56,6 +56,13 @@ class Settings(BaseSettings):
         ZoneInfo(v)
         return v
 
+    @field_validator("orientation", mode="before")
+    @classmethod
+    def _coerce_orientation(cls, v):
+        if isinstance(v, str) and v.strip().lstrip("-").isdigit():
+            return int(v)
+        return v
+
     @property
     def upload_dir(self) -> Path:
         return self.photos_dir / self.upload_subdir
