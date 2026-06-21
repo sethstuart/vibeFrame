@@ -23,10 +23,14 @@ services:
       - /mnt/vibeFrame:/vibeFrame
       - vibeframe-state:/var/lib/vibeframe
       - vibeframe-cache:/var/cache/vibeframe
-      # Host devicetree — gpiodevice (used by inky) reads this to detect the
-      # Pi model and pick the right gpiochip. Without it, inky fails with
-      # "No compatible platform detected!" on first show().
-      - /sys/firmware/devicetree:/sys/firmware/devicetree:ro
+      # Host devicetree — gpiodevice (used by inky) reads
+      # /proc/device-tree/compatible to detect the Pi model and pick the
+      # right gpiochip. The container's procfs has /proc/device-tree as a
+      # symlink to /sys/firmware/devicetree/base but the target doesn't
+      # exist inside the container (sysfs is read-only, can't bind into it).
+      # Binding directly at /proc/device-tree replaces the broken symlink
+      # with the actual devicetree data resolved from the host symlink.
+      - /proc/device-tree:/proc/device-tree:ro
     env_file: .env
 
 volumes:
