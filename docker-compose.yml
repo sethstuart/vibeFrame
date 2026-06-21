@@ -7,7 +7,6 @@ services:
       - "8080:8080"
     devices:
       - "/dev/spidev0.0:/dev/spidev0.0"
-      - "/dev/spidev0.1:/dev/spidev0.1"
       - "/dev/i2c-1:/dev/i2c-1"
       - "/dev/gpiochip0:/dev/gpiochip0"
     # Numeric GIDs from the Pi host (group_add resolves names against the
