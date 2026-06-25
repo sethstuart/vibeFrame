@@ -52,26 +52,32 @@
     </div>
   </div>
 
-  <aside class="stack">
+  <aside class="stack" x-data="{ dirty: false }">
     <h3 class="eyebrow">Live preview</h3>
     <div class="card padded live-preview-card">
       {% if preview_id %}
-      <div class="compare" id="compare" aria-label="Before / after compare">
-        <img class="after" id="preview-img"
+      <div class="compare" id="compare" :class="dirty ? 'dirty' : 'clean'"
+           aria-label="Before / after compare">
+        <!-- Current frame render (always visible base layer). -->
+        <img class="after" id="current-img"
              src="/images/{{ preview_id }}/preview.png"
-             alt="Panel render" />
-        <div class="before-wrap" id="before-wrap">
-          <img class="before" id="before-img"
-               src="/images/{{ preview_id }}/thumb.png"
-               alt="Source" />
+             alt="On the frame now" />
+        <!-- Proposed render (loaded only after first adjustment). -->
+        <div class="before-wrap" id="proposed-wrap" x-show="dirty" x-cloak>
+          <img class="before" id="proposed-img"
+               alt="With proposed settings" />
         </div>
         <span class="handle" id="compare-handle" role="slider"
-              tabindex="0" aria-label="Drag to compare"></span>
-        <div class="compare-labels"><span>Source</span><span>Panel render</span></div>
+              tabindex="0" aria-label="Drag to compare"
+              x-show="dirty" x-cloak></span>
+        <div class="compare-labels" x-show="dirty" x-cloak>
+          <span>Proposed</span><span>Current</span>
+        </div>
       </div>
-      <p class="muted" style="margin-top: var(--space-3); font-size: var(--text-xs);">
-        Drag the handle to compare. Updates as you adjust dither, saturation, contrast.
-      </p>
+      <p class="muted" style="margin-top: var(--space-3); font-size: var(--text-xs);"
+         x-text="dirty
+           ? 'Drag the handle to compare. Save to commit these settings.'
+           : 'Adjust settings to preview a proposed render.'"></p>
       <progress id="preview-progress" class="preview-progress" max="100" value="0"></progress>
       {% else %}
       <div class="image-frame">
@@ -90,29 +96,31 @@
 {% if preview_id %}
 <script>
 (function () {
-  const compare = document.getElementById('compare');
-  const handle  = document.getElementById('compare-handle');
-  const wrap    = document.getElementById('before-wrap');
-  const before  = document.getElementById('before-img');
-  const form    = document.getElementById('settings-form');
-  const after   = document.getElementById('preview-img');
-  const prog    = document.getElementById('preview-progress');
+  const compare  = document.getElementById('compare');
+  const handle   = document.getElementById('compare-handle');
+  const wrap     = document.getElementById('proposed-wrap');
+  const proposed = document.getElementById('proposed-img');
+  const current  = document.getElementById('current-img');
+  const form     = document.getElementById('settings-form');
+  const prog     = document.getElementById('preview-progress');
+  const aside    = compare.closest('aside');
 
   // ── Before/after drag handling ──
-  function sync() {
-    // Resize .before to match .compare's pixel width so it stays put when
-    // .before-wrap's width changes.
+  // The clipped image (.before inside .before-wrap) must be sized to the
+  // outer compare element's pixel width so its position doesn't shift when
+  // the wrap width changes during drag.
+  function syncWidth() {
     const w = compare.getBoundingClientRect().width;
-    before.style.width = w + 'px';
+    proposed.style.width = w + 'px';
   }
   function setPct(pct) {
     pct = Math.min(100, Math.max(0, pct));
     wrap.style.width = pct + '%';
     handle.style.left = pct + '%';
   }
-  sync();
+  syncWidth();
   setPct(50);
-  new ResizeObserver(sync).observe(compare);
+  new ResizeObserver(syncWidth).observe(compare);
 
   let dragging = false;
   const xToPct = (clientX) => {
@@ -135,9 +143,8 @@
     setPct(xToPct(e.clientX));
   });
 
-  // ── Live re-render on input changes ──
+  // ── Live re-render on settings changes ──
   const watch = ['dither', 'crop_mode', 'saturation', 'contrast', 'orientation'];
-  let debounce = null;
   let pollTimer = null;
   function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
   async function pollProgress() {
@@ -150,24 +157,32 @@
     } catch {}
   }
   function trigger() {
-    clearTimeout(debounce);
-    debounce = setTimeout(() => {
-      const data = new FormData(form);
-      const params = new URLSearchParams();
-      watch.forEach(k => { const v = data.get(k); if (v !== null) params.set(k, v); });
-      prog.classList.add('busy');
-      prog.value = 0;
+    // First adjustment in this session: flip dirty, reveal the slider and
+    // the proposed layer. Subsequent adjustments just refresh the proposed
+    // image.
+    const state = window.Alpine && Alpine.$data ? Alpine.$data(aside) : null;
+    if (state && !state.dirty) {
+      state.dirty = true;
+      // Re-sync after layout repaints with the now-visible wrap.
+      requestAnimationFrame(syncWidth);
+    }
+    const data = new FormData(form);
+    const params = new URLSearchParams();
+    watch.forEach(k => { const v = data.get(k); if (v !== null) params.set(k, v); });
+    prog.classList.add('busy');
+    prog.value = 0;
+    stopPolling();
+    pollTimer = setInterval(pollProgress, 250);
+    proposed.onload = proposed.onerror = () => {
+      prog.value = 100;
+      setTimeout(() => prog.classList.remove('busy'), 200);
       stopPolling();
-      pollTimer = setInterval(pollProgress, 250);
-      after.onload = after.onerror = () => {
-        prog.value = 100;
-        setTimeout(() => prog.classList.remove('busy'), 200);
-        stopPolling();
-      };
-      after.src = `/images/{{ preview_id }}/render-with.png?${params.toString()}&cb=${Date.now()}`;
-    }, 350);
+    };
+    proposed.src = `/images/{{ preview_id }}/render-with.png?${params.toString()}&cb=${Date.now()}`;
   }
-  form.addEventListener('input',  (e) => { if (watch.includes(e.target.name)) trigger(); });
+  // Only `change` — fires on slider release (mouseup/touchend), select
+  // selection, and text input blur. Range inputs no longer kick off a
+  // render on every drag pixel.
   form.addEventListener('change', (e) => { if (watch.includes(e.target.name)) trigger(); });
 })();
 </script>

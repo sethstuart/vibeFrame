@@ -50,12 +50,12 @@ def _sorted_rows(snap: dict, sort: str) -> tuple[list[dict], str]:
     return rows, sort_key
 
 
-@router.get("/metrics")
+@router.get("/metrics.json")
 def metrics_json():
     return timing.snapshot()
 
 
-@router.get("/metrics.html", response_class=HTMLResponse)
+@router.get("/metrics", response_class=HTMLResponse)
 def metrics_html(request: Request, sort: str = "p95_ms", state: AppState = Depends(get_state)):
     snap = timing.snapshot()
     rows, sort_key = _sorted_rows(snap, sort)

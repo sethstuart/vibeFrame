@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_macros.html" import button %}
 {% set active = 'home' %}
+{% block main_class %}fit-viewport{% endblock %}
 {% block body %}
 <section class="page-title">
   <h1>Now showing</h1>
@@ -104,66 +105,90 @@
       get dashoffset() { return SPINNER_CIRC * (1 - this.pct / 100); },
       _timer: null,
       _renderedSwapped: false,
-      _lastImageId: null,
+      // Baseline of the tracker as it stood when this page loaded. Any
+      // refresh "active" or "shown_at" newer than this is treated as
+      // in-session work; matching it means it's historical state we
+      // should ignore (no spinner, no image swap).
+      _baselineShownAt: null,
+      _baselineStartedAt: null,
       init() {
         this.$el.addEventListener('refresh-start', () => this.begin());
-        // Also kick off polling on initial load in case a refresh was
-        // already running when we navigated in (e.g. server-triggered).
-        this.pollOnce(true);
+        // Capture baseline once on load. No UI state changes from this call.
+        this.captureBaseline();
       },
-      begin() {
+      async captureBaseline() {
+        try {
+          const r = await fetch('/system/render-status', { cache: 'no-store' });
+          const j = await r.json();
+          const ref = j.refresh || {};
+          this._baselineShownAt = ref.shown_at || null;
+          this._baselineStartedAt = ref.started_at || null;
+          // If a refresh is genuinely in flight RIGHT NOW (active), drop
+          // straight into polling so the user gets the live spinner.
+          if (ref.active) this.begin(/*skipReset=*/true);
+        } catch {}
+      },
+      begin(skipReset) {
         this.active = true;
-        this.pct = 1;
+        this.pct = skipReset ? this.pct : 1;
         this.stageLabel = STAGE_LABELS.pick;
         this._renderedSwapped = false;
         this.startPolling();
       },
       startPolling() {
         clearInterval(this._timer);
-        this._timer = setInterval(() => this.pollOnce(false), 500);
+        this._timer = setInterval(() => this.pollOnce(), 500);
       },
       stopPolling() {
         clearInterval(this._timer);
         this._timer = null;
       },
-      async pollOnce(silent) {
+      async pollOnce() {
         try {
           const r = await fetch('/system/render-status', { cache: 'no-store' });
           const j = await r.json();
           const ref = j.refresh || {};
-          if (!silent && !ref.active && !ref.done) return; // nothing happening
-          if (silent && !ref.active && !ref.done) return;
-          // We have a job (active OR just finished — pick up `done` state too).
-          this.active = ref.active || !ref.done;
+          // Ignore historical state: only react to a new refresh started
+          // since we loaded the page (or one currently active).
+          const isInSession =
+            ref.active
+            || (ref.started_at && ref.started_at !== this._baselineStartedAt);
+          if (!isInSession) {
+            // Tracker is reporting stale (pre-load) state. Hide spinner.
+            this.active = false;
+            this.stopPolling();
+            return;
+          }
+          this.active = !ref.done || !this._renderedSwapped;
           if (ref.progress_pct != null) this.pct = ref.progress_pct;
           if (ref.stage) this.stageLabel = STAGE_LABELS[ref.stage] || ref.stage;
-          // Early swap: as soon as cache write completed, repoint the
-          // displayed image at the rendered preview. Don't wait for panel push.
           if (ref.rendered && ref.image_id && !this._renderedSwapped) {
-            this.swapImage(ref.image_id, ref.rendered_at);
+            this.swapImage(ref.image_id, ref.image_path, ref.rendered_at);
             this._renderedSwapped = true;
           }
           if (ref.done) {
-            // Hide overlay shortly after done. Trigger a final fragment
-            // refresh so the caption (path, "shown at") updates.
+            this._baselineShownAt = ref.shown_at || this._baselineShownAt;
+            this._baselineStartedAt = ref.started_at || this._baselineStartedAt;
             this.active = false;
             this.stopPolling();
             if (window.htmx) window.htmx.trigger('#now-showing-fragment', 'load');
           }
-        } catch (e) { /* ignore transient errors */ }
+        } catch (e) { /* transient — keep polling */ }
       },
-      swapImage(imageId, ts) {
+      swapImage(imageId, imagePath, ts) {
         const frag = document.getElementById('now-showing-fragment');
         if (!frag) return;
         const cb = ts ? new Date(ts).getTime() : Date.now();
+        const name = imagePath ? imagePath.split('/').pop() : '';
         frag.innerHTML = `
           <div class="image-frame">
-            <img src="/images/${imageId}/preview.png?cb=${cb}"
-                 alt="Now rendering on the panel" loading="lazy" />
+            <img src="/images/${imageId}/source-cropped.jpg?v=${cb}"
+                 alt="Currently on the panel" loading="lazy" />
           </div>
           <div class="hero-caption">
-            <span class="path">rendering…</span>
-            <span class="when">panel push in progress</span>
+            <span class="path">${name}</span>
+            <span class="when"></span>
+            <a href="/images/${imageId}/preview.png" target="_blank" class="muted">View panel render →</a>
           </div>`;
       },
     };

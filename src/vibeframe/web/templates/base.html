@@ -23,7 +23,7 @@
       <a href="/images" class="{% if active == 'library' %}active{% endif %}">Library</a>
       <a href="/images?favorites_only=true" class="{% if active == 'favorites' %}active{% endif %}">Favorites</a>
       <a href="/settings" class="{% if active == 'settings' %}active{% endif %}">Settings</a>
-      <a href="/metrics.html" class="{% if active == 'metrics' %}active{% endif %}">Metrics</a>
+      <a href="/metrics" class="{% if active == 'metrics' %}active{% endif %}">Metrics</a>
     </nav>
     <div class="header-right">
       <span hx-get="/system/status-chip" hx-trigger="load, every 10s" hx-swap="outerHTML"
@@ -43,7 +43,7 @@
     })();
   </script>
 
-  <main class="app-main">
+  <main class="app-main {% block main_class %}{% endblock %}">
     {% block body %}{% endblock %}
   </main>
 
@@ -53,7 +53,7 @@
       <li><a href="/images" class="{% if active == 'library' %}active{% endif %}">{{ icon('grid', 22) }}Library</a></li>
       <li><a href="/images?favorites_only=true" class="{% if active == 'favorites' %}active{% endif %}">{{ icon('star', 22) }}Favs</a></li>
       <li><a href="/settings" class="{% if active == 'settings' %}active{% endif %}">{{ icon('settings', 22) }}Settings</a></li>
-      <li><a href="/metrics.html" class="{% if active == 'metrics' %}active{% endif %}">{{ icon('bar-chart', 22) }}Metrics</a></li>
+      <li><a href="/metrics" class="{% if active == 'metrics' %}active{% endif %}">{{ icon('bar-chart', 22) }}Metrics</a></li>
     </ul>
   </nav>
 </body>

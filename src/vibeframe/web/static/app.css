@@ -102,6 +102,32 @@ main.app-main {
   margin: 0 auto;
 }
 
+/* Home page on desktop: flex column that fills viewport height so the
+   hero row absorbs leftover space and the whole single-column stack
+   (title, hero, action bar, recent, upload) fits without scrolling. */
+@media (min-height: 600px) and (min-width: 721px) {
+  main.app-main.fit-viewport {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    min-height: calc(100vh - var(--header-height));
+    max-height: calc(100vh - var(--header-height));
+    padding: var(--space-4) var(--space-6);
+  }
+  main.app-main.fit-viewport > .page-title,
+  main.app-main.fit-viewport > .quiet-banner,
+  main.app-main.fit-viewport > .action-bar,
+  main.app-main.fit-viewport > .recent-section,
+  main.app-main.fit-viewport > .upload-section { flex: 0 0 auto; }
+  main.app-main.fit-viewport > .hero {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
 @media (max-width: 720px) {
   header.app-header { padding: 0 var(--space-4); }
   nav.primary { display: none; } /* mobile uses bottom nav */
@@ -354,22 +380,38 @@ input[type="range"] {
 .pager .meta { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--text-xs); margin-left: auto; }
 
 /* ──────────────────────────────────────── Home / hero ── */
-/* Single-column vertical stack: page title, hero, actions, recent, upload. */
+/* Single-column vertical stack: page title, hero, actions, recent, upload.
+   When .app-main.fit-viewport is active, the hero row flexes to fill
+   leftover space and the image-frame's height is capped by that. */
 .hero {
   position: relative;
   background: var(--surface-raised);
   border: var(--border-hair) solid var(--border-default);
   border-radius: var(--radius-sm);
   padding: var(--space-3);
+  width: 100%;
+}
+.hero #now-showing-fragment {
+  display: flex; flex-direction: column;
+  height: 100%;
 }
 .hero .image-frame {
   position: relative;
-  width: 100%;                /* fill #now-showing-fragment width */
-  aspect-ratio: 480 / 800;    /* panel shape; height follows width */
   background: var(--surface-sunken);
   border-radius: var(--radius-xs);
   overflow: hidden;
   display: flex; align-items: center; justify-content: center;
+  /* Default (no fit-viewport): fill width, panel aspect drives height. */
+  width: 100%;
+  aspect-ratio: 480 / 800;
+  margin: 0 auto;
+}
+/* When the page is sized to fit viewport, the image-frame is height-driven
+   and the aspect ratio derives the width — so it never overflows the row. */
+main.app-main.fit-viewport .hero .image-frame {
+  height: 100%; max-height: 100%;
+  width: auto; max-width: 100%;
+  aspect-ratio: 480 / 800;
 }
 .hero .image-frame img {
   width: 100%; height: 100%;
@@ -387,6 +429,7 @@ input[type="range"] {
 
 .action-bar {
   display: flex; flex-wrap: wrap; gap: var(--space-3);
+  padding: var(--space-3) 0;          /* vertical breathing room only */
 }
 
 /* Determinate-ish circular progress overlay shown during a refresh. */

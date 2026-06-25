@@ -159,8 +159,8 @@ load harness for capturing clean numbers without waiting for real traffic.
 Every request and every background stage records into in-memory ring buffers
 (last 256 samples each, lifetime counters). View them at:
 
-- `http://<host>:8080/metrics.html` — sortable table, slow rows highlighted
-- `GET /metrics` — JSON for scripting
+- `http://<host>:8080/metrics` — sortable table, slow rows highlighted
+- `GET /metrics.json` — JSON for scripting
 - `POST /metrics/clear` — reset (useful before reproducing a slow case)
 
 Stage names you'll see:
@@ -189,7 +189,7 @@ python -m vibeframe.bench --photos 50 --pick 10 --runs 3
 ```
 
 Times each stage cold (empty cache) and warm (cache hits), reports a markdown
-table. Add `--metrics-url http://localhost:8080/metrics` to also dump the live
+table. Add `--metrics-url http://localhost:8080/metrics.json` to also dump the live
 container's accumulated metrics.
 
 ### Deep profiling with py-spy

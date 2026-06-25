@@ -229,6 +229,39 @@ def render_with(
     return Response(content=buf.getvalue(), media_type="image/png")
 
 
+@router.get("/{image_id}/source-cropped.jpg")
+def source_cropped(image_id: int, state: AppState = Depends(get_state)):
+    """Full-quality JPEG of the source image cropped to mirror the panel's
+    composition. Uses the same EXIF-transpose + crop step as the dither
+    pipeline (no tonemap, no dither, no palette quantize). Drives the home
+    page hero so the user sees a sharp, full-colour reference of what's on
+    the panel — not the dithered render itself."""
+    from PIL import Image as PILImage
+    from PIL import ImageOps
+
+    from vibeframe.processor import crop as crop_mod
+    from vibeframe.processor.pipeline import _target_size
+
+    img = state.library.get(image_id)
+    if not img:
+        raise HTTPException(status_code=404, detail="not found")
+
+    target_w, target_h = _target_size(state.settings.orientation)
+    with timed("source_cropped"):
+        with PILImage.open(img.path) as raw:
+            oriented = ImageOps.exif_transpose(raw).convert("RGB")
+        cropped = crop_mod.crop_to(
+            oriented, target_w, target_h, state.settings.crop_mode
+        )
+        buf = io.BytesIO()
+        cropped.save(buf, format="JPEG", quality=90)
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/jpeg",
+        headers=THUMB_CACHE_HEADERS,
+    )
+
+
 @router.get("/{image_id}/thumb.png")
 def thumb(image_id: int, state: AppState = Depends(get_state)):
     img = state.library.get(image_id)

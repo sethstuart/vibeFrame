@@ -8,7 +8,7 @@ Usage (inside the container or any environment with vibeframe installed):
     python -m vibeframe.bench --from /vibeFrame --pick 10   # only 10 of them
 
 Reports per-stage timings as a markdown table to stdout. With --metrics-url it
-also fetches /metrics from a running container and includes those numbers.
+also fetches /metrics.json from a running container and includes those numbers.
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--from", dest="from_dir", help="use real photos under this dir instead of synthetics")
     p.add_argument("--pick", type=int, default=10, help="how many photos to push through the pipeline")
     p.add_argument("--runs", type=int, default=1, help="repeat the whole bench N times")
-    p.add_argument("--metrics-url", help="fetch /metrics from a running instance and include in report")
+    p.add_argument("--metrics-url", help="fetch /metrics.json from a running instance and include in report")
     args = p.parse_args(argv)
 
     with tempfile.TemporaryDirectory(prefix="vibeframe-bench-") as work:
