@@ -189,6 +189,7 @@ class ImageLibrary:
         return n
 
     def bulk_delete(self, image_ids: list[int]) -> int:
+        import contextlib
         from pathlib import Path as _P
 
         n = 0
@@ -196,10 +197,8 @@ class ImageLibrary:
             img = self.get(image_id)
             if img is None:
                 continue
-            try:
+            with contextlib.suppress(OSError):
                 _P(img.path).unlink(missing_ok=True)
-            except OSError:
-                pass
             self.remove_path(_P(img.path))
             n += 1
         return n

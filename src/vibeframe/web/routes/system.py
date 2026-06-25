@@ -47,8 +47,9 @@ def _now_showing_context(state: AppState) -> dict:
         # lookup rather than scanning the recent list.
         from pathlib import Path
 
-        from vibeframe.db import Image as DbImage
         from sqlmodel import Session, select
+
+        from vibeframe.db import Image as DbImage
 
         with Session(state.engine) as session:
             row = session.exec(

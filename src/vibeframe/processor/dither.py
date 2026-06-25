@@ -18,7 +18,7 @@ import numpy as np
 
 from vibeframe.processor.palette import RGB, SPECTRA6, palette_lab, rgb_to_lab
 
-# 64-level (step=4) RGB→palette LUT: 64^3 = 262 144 entries × 1 byte = ~256 kB.
+# 64-level (step=4) RGB->palette LUT: 64^3 = 262 144 entries x 1 byte = ~256 kB.
 # Plenty fine-grained for visually correct nearest-palette mapping at the
 # bin-centre RGB resolution we sample.
 _LUT_STEP = 4
