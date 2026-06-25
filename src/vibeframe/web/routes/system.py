@@ -103,6 +103,19 @@ def system_status_chip(request: Request, state: AppState = Depends(get_state)):
     )
 
 
+@router.get("/system/render-status")
+def render_status(state: AppState = Depends(get_state)):
+    """Live progress snapshot for both render contexts: the scheduler's panel
+    refresh and the settings live preview. The web UI polls this every 250-500
+    ms to drive determinate progress indicators and to swap the home image as
+    soon as `refresh.rendered` flips true (cache write done, panel push still
+    in flight)."""
+    return {
+        "refresh": state.scheduler.refresh_tracker.snapshot(),
+        "preview": state.preview_tracker.snapshot(),
+    }
+
+
 @router.get("/system/recent")
 def system_recent(limit: int = 12, state: AppState = Depends(get_state)):
     pairs = state.library.recent_shown(limit=limit)

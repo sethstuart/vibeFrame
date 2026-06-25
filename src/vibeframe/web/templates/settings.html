@@ -56,25 +56,23 @@
     <h3 class="eyebrow">Live preview</h3>
     <div class="card padded live-preview-card">
       {% if preview_id %}
-      <div class="compare" id="compare" style="--pos: 50%;">
-        <img class="before" src="/images/{{ preview_id }}/thumb.png" alt="Source image" />
-        <img class="after"  id="preview-img"
+      <div class="compare" id="compare" aria-label="Before / after compare">
+        <img class="after" id="preview-img"
              src="/images/{{ preview_id }}/preview.png"
-             alt="Panel preview"
-             onload="document.getElementById('preview-progress').classList.remove('busy')"
-             onerror="document.getElementById('preview-progress').classList.remove('busy')" />
-        <span class="divider-line" aria-hidden="true"></span>
-        <input class="slider" type="range" min="0" max="100" value="50"
-               aria-label="Before/after compare"
-               oninput="document.getElementById('compare').style.setProperty('--pos', this.value + '%')" />
-        <div class="compare-labels">
-          <span>Source</span><span>Panel render</span>
+             alt="Panel render" />
+        <div class="before-wrap" id="before-wrap">
+          <img class="before" id="before-img"
+               src="/images/{{ preview_id }}/thumb.png"
+               alt="Source" />
         </div>
+        <span class="handle" id="compare-handle" role="slider"
+              tabindex="0" aria-label="Drag to compare"></span>
+        <div class="compare-labels"><span>Source</span><span>Panel render</span></div>
       </div>
       <p class="muted" style="margin-top: var(--space-3); font-size: var(--text-xs);">
-        Drag the slider to compare. Updates as you adjust dither, saturation, contrast.
+        Drag the handle to compare. Updates as you adjust dither, saturation, contrast.
       </p>
-      <progress id="preview-progress" max="100" value="0" class="preview-progress"></progress>
+      <progress id="preview-progress" class="preview-progress" max="100" value="0"></progress>
       {% else %}
       <div class="image-frame">
         <p class="muted mono">Upload an image to see a live preview.</p>
@@ -91,31 +89,87 @@
 
 {% if preview_id %}
 <script>
-  // Debounced live-update: when dither/saturation/contrast/crop_mode/orientation
-  // change, repoint the preview <img> at render-with.png with the current values.
-  (function () {
-    const form = document.getElementById('settings-form');
-    const img = document.getElementById('preview-img');
-    const prog = document.getElementById('preview-progress');
-    const watch = ['dither', 'crop_mode', 'saturation', 'contrast', 'orientation'];
-    let t = null;
-    const trigger = () => {
-      clearTimeout(t);
-      t = setTimeout(() => {
-        const data = new FormData(form);
-        const params = new URLSearchParams();
-        watch.forEach(k => { const v = data.get(k); if (v !== null) params.set(k, v); });
-        prog.classList.add('busy');
-        img.src = `/images/{{ preview_id }}/render-with.png?${params.toString()}&cb=${Date.now()}`;
-      }, 350);
-    };
-    form.addEventListener('input', (ev) => {
-      if (watch.includes(ev.target.name)) trigger();
-    });
-    form.addEventListener('change', (ev) => {
-      if (watch.includes(ev.target.name)) trigger();
-    });
-  })();
+(function () {
+  const compare = document.getElementById('compare');
+  const handle  = document.getElementById('compare-handle');
+  const wrap    = document.getElementById('before-wrap');
+  const before  = document.getElementById('before-img');
+  const form    = document.getElementById('settings-form');
+  const after   = document.getElementById('preview-img');
+  const prog    = document.getElementById('preview-progress');
+
+  // ── Before/after drag handling ──
+  function sync() {
+    // Resize .before to match .compare's pixel width so it stays put when
+    // .before-wrap's width changes.
+    const w = compare.getBoundingClientRect().width;
+    before.style.width = w + 'px';
+  }
+  function setPct(pct) {
+    pct = Math.min(100, Math.max(0, pct));
+    wrap.style.width = pct + '%';
+    handle.style.left = pct + '%';
+  }
+  sync();
+  setPct(50);
+  new ResizeObserver(sync).observe(compare);
+
+  let dragging = false;
+  const xToPct = (clientX) => {
+    const r = compare.getBoundingClientRect();
+    return ((clientX - r.left) / r.width) * 100;
+  };
+  handle.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    handle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove', (e) => { if (dragging) setPct(xToPct(e.clientX)); });
+  handle.addEventListener('pointerup', (e) => {
+    dragging = false;
+    try { handle.releasePointerCapture(e.pointerId); } catch {}
+  });
+  handle.addEventListener('pointercancel', () => { dragging = false; });
+  compare.addEventListener('click', (e) => {
+    if (e.target === handle) return;
+    setPct(xToPct(e.clientX));
+  });
+
+  // ── Live re-render on input changes ──
+  const watch = ['dither', 'crop_mode', 'saturation', 'contrast', 'orientation'];
+  let debounce = null;
+  let pollTimer = null;
+  function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
+  async function pollProgress() {
+    try {
+      const r = await fetch('/system/render-status', { cache: 'no-store' });
+      const j = await r.json();
+      const p = j.preview || {};
+      if (p.progress_pct != null) prog.value = p.progress_pct;
+      if (p.done) stopPolling();
+    } catch {}
+  }
+  function trigger() {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      const data = new FormData(form);
+      const params = new URLSearchParams();
+      watch.forEach(k => { const v = data.get(k); if (v !== null) params.set(k, v); });
+      prog.classList.add('busy');
+      prog.value = 0;
+      stopPolling();
+      pollTimer = setInterval(pollProgress, 250);
+      after.onload = after.onerror = () => {
+        prog.value = 100;
+        setTimeout(() => prog.classList.remove('busy'), 200);
+        stopPolling();
+      };
+      after.src = `/images/{{ preview_id }}/render-with.png?${params.toString()}&cb=${Date.now()}`;
+    }, 350);
+  }
+  form.addEventListener('input',  (e) => { if (watch.includes(e.target.name)) trigger(); });
+  form.addEventListener('change', (e) => { if (watch.includes(e.target.name)) trigger(); });
+})();
 </script>
 {% endif %}
 {% endblock %}

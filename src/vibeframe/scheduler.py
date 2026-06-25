@@ -14,6 +14,7 @@ from vibeframe.db import record_show
 from vibeframe.display.base import DisplayDriver
 from vibeframe.library import ImageLibrary
 from vibeframe.processor.pipeline import process
+from vibeframe.progress import RenderTracker
 from vibeframe.timing import record, timed
 
 log = logging.getLogger(__name__)
@@ -79,6 +80,9 @@ class Scheduler:
         self._next_override: int | None = None
         self._busy = False
         self._next_due_at: datetime | None = None
+        # Live render progress for the web UI's home page (circular spinner,
+        # early image swap on cache write).
+        self.refresh_tracker = RenderTracker()
 
     async def run(self) -> None:
         log.info(
@@ -120,17 +124,27 @@ class Scheduler:
             return
 
         self._busy = True
+        self.refresh_tracker.start(image_id, img.path)
         try:
             loop = asyncio.get_running_loop()
             processed = await loop.run_in_executor(
-                None, process, Path(img.path), self.settings, self.cache, img.sha256
+                None,
+                _process_with_tracker,
+                Path(img.path),
+                self.settings,
+                self.cache,
+                img.sha256,
+                self.refresh_tracker,
             )
+            self.refresh_tracker.set_stage("show", 95.0)
             await loop.run_in_executor(None, self.driver.show, processed.image)
-        except Exception:
+        except Exception as e:
             log.exception("failed to render/show image %s", img.path)
+            self.refresh_tracker.mark_failed(repr(e))
             self._busy = False
             return
         self._busy = False
+        self.refresh_tracker.mark_done()
 
         record_show(self.engine, image_id)
         self._last_path = img.path
@@ -168,3 +182,14 @@ def _td_seconds(seconds: float):
     from datetime import timedelta
 
     return timedelta(seconds=seconds)
+
+
+def _process_with_tracker(
+    path: Path,
+    settings: Settings,
+    cache: Cache,
+    sha256: str,
+    tracker: RenderTracker,
+):
+    """Trampoline for run_in_executor — keyword args aren't directly forwarded."""
+    return process(path, settings, cache, sha256, tracker=tracker)

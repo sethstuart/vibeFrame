@@ -1,90 +1,172 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, icon_button, icon %}
+{% from "_macros.html" import button %}
 {% set active = 'home' %}
 {% block body %}
-<div class="home-grid" x-data="{ refreshing: false }">
+<section class="page-title">
+  <h1>Now showing</h1>
+  <span class="subtitle">{{ s.orientation }}° · {{ (s.refresh_seconds / 60)|round(0, 'floor')|int }} min refresh</span>
+</section>
 
-  <section class="page-title">
-    <h1>Now showing</h1>
-    <span class="subtitle">{{ s.orientation }}° · {{ (s.refresh_seconds / 60)|round(0, 'floor')|int }} min refresh</span>
-  </section>
-
-  {% if in_quiet %}
-  <div class="quiet-banner">
-    <span class="status-dot warn"></span>
-    Quiet hours active — refreshes paused {{ s.quiet_start }}–{{ s.quiet_end }} {{ s.tz }}.
-  </div>
-  {% endif %}
-
-  <section class="hero">
-    <div id="now-showing-fragment"
-         hx-get="/system/now-showing"
-         hx-trigger="every 30s"
-         hx-swap="innerHTML"
-         hx-on::after-swap="refreshing = false">
-      {% include "_now_showing.html" %}
-    </div>
-    <div class="processing-overlay" x-show="refreshing" x-cloak aria-live="polite">
-      <svg class="spinner" viewBox="0 0 56 56" aria-hidden="true">
-        <circle class="track" cx="28" cy="28" r="24" />
-        <circle class="indicator" cx="28" cy="28" r="24" />
-      </svg>
-      <span class="label">Processing & pushing to panel…</span>
-    </div>
-  </section>
-
-  <section class="action-bar">
-    <form hx-post="/system/next" hx-swap="none"
-          hx-on::before-request="refreshing = true"
-          hx-on::after-request="htmx.trigger('#now-showing-fragment', 'load')">
-      {{ button('Show next now', variant='primary', icon_name='skip-forward', type='submit') }}
-    </form>
-    <form hx-post="/system/test-pattern" hx-swap="none"
-          hx-on::before-request="refreshing = true"
-          hx-on::after-request="htmx.trigger('#now-showing-fragment', 'load')">
-      {{ button('Show test pattern', variant='secondary', icon_name='zap', type='submit') }}
-    </form>
-  </section>
-
-  <section class="recent-section">
-    <h2 class="eyebrow">Recently shown</h2>
-    <div class="recent-strip"
-         hx-get="/system/recent" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>
-    <script>
-      document.body.addEventListener('htmx:afterSwap', (ev) => {
-        const t = ev.target;
-        if (!t.classList.contains('recent-strip')) return;
-        let data; try { data = JSON.parse(t.textContent); } catch { return; }
-        t.innerHTML = data.map(r =>
-          `<a class="recent-card" href="#" title="${r.name}"
-              hx-post="/images/${r.id}/show" hx-swap="none">
-             <img src="${r.thumb}" alt="${r.name}" loading="lazy" />
-           </a>`
-        ).join('');
-        if (window.htmx) window.htmx.process(t);
-      });
-    </script>
-  </section>
-
-  <section class="upload-section">
-    <h2 class="eyebrow">Upload to NFS</h2>
-    <div class="drop-zone" x-data="dropzone" x-ref="zone"
-         :class="dragOver ? 'drag-over' : ''">
-      <form x-ref="form"
-            hx-post="/images/upload"
-            hx-encoding="multipart/form-data"
-            hx-target="#upload-result"
-            hx-swap="innerHTML"
-            hx-on::after-request="if(event.detail.successful) this.reset()">
-        <input x-ref="input" type="file" name="files" accept="image/*" multiple hidden
-               @change="$refs.form.requestSubmit()" />
-        <p>Drop image files here, or
-          <span class="pick" @click="$refs.input.click()">browse</span>
-        </p>
-      </form>
-    </div>
-    <div id="upload-result" aria-live="polite"></div>
-  </section>
-
+{% if in_quiet %}
+<div class="quiet-banner">
+  <span class="status-dot warn"></span>
+  Quiet hours active — refreshes paused {{ s.quiet_start }}–{{ s.quiet_end }} {{ s.tz }}.
 </div>
+{% endif %}
+
+<section class="hero" x-data="renderProgress()">
+  <div id="now-showing-fragment"
+       hx-get="/system/now-showing"
+       hx-trigger="every 30s"
+       hx-swap="innerHTML">
+    {% include "_now_showing.html" %}
+  </div>
+  <div class="processing-overlay" x-show="active" x-cloak aria-live="polite">
+    <svg class="spinner" viewBox="0 0 56 56" aria-hidden="true">
+      <circle class="track" cx="28" cy="28" r="24" />
+      <circle class="indicator" cx="28" cy="28" r="24" :style="`stroke-dashoffset: ${dashoffset}`" />
+    </svg>
+    <span class="label" x-text="stageLabel"></span>
+  </div>
+</section>
+
+<section class="action-bar">
+  <form hx-post="/system/next" hx-swap="none"
+        hx-on::before-request="$dispatch('refresh-start')">
+    {{ button('Show next now', variant='primary', icon_name='skip-forward', type='submit') }}
+  </form>
+  <form hx-post="/system/test-pattern" hx-swap="none"
+        hx-on::before-request="$dispatch('refresh-start')">
+    {{ button('Show test pattern', variant='secondary', icon_name='zap', type='submit') }}
+  </form>
+</section>
+
+<section class="recent-section">
+  <h2 class="eyebrow">Recently shown</h2>
+  <div class="recent-strip"
+       hx-get="/system/recent" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>
+  <script>
+    document.body.addEventListener('htmx:afterSwap', (ev) => {
+      const t = ev.target;
+      if (!t.classList.contains('recent-strip')) return;
+      let data; try { data = JSON.parse(t.textContent); } catch { return; }
+      t.innerHTML = data.map(r =>
+        `<a class="recent-card" href="#" title="${r.name}"
+            hx-post="/images/${r.id}/show" hx-swap="none">
+           <img src="${r.thumb}" alt="${r.name}" loading="lazy" />
+         </a>`
+      ).join('');
+      if (window.htmx) window.htmx.process(t);
+    });
+  </script>
+</section>
+
+<section class="upload-section">
+  <h2 class="eyebrow">Upload to NFS</h2>
+  <div class="drop-zone" x-data="dropzone" x-ref="zone"
+       :class="dragOver ? 'drag-over' : ''">
+    <form x-ref="form"
+          hx-post="/images/upload"
+          hx-encoding="multipart/form-data"
+          hx-target="#upload-result"
+          hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful) this.reset()">
+      <input x-ref="input" type="file" name="files" accept="image/*" multiple hidden
+             @change="$refs.form.requestSubmit()" />
+      <p>Drop image files here, or
+        <span class="pick" @click="$refs.input.click()">browse</span>
+      </p>
+    </form>
+  </div>
+  <div id="upload-result" aria-live="polite"></div>
+</section>
+
+<script>
+  // Polls /system/render-status while a refresh is in flight. Drives the
+  // determinate circular spinner from the real pipeline progress AND swaps
+  // the now-showing image as soon as the render completes (cache write),
+  // without waiting for the ~38s panel push.
+  const STAGE_LABELS = {
+    pick: 'Picking image…', cache_lookup: 'Looking up cache…',
+    decode: 'Reading image from NFS…', exif: 'Reading EXIF…',
+    crop: 'Cropping…', tonemap: 'Tonemapping…', ndarray: 'Converting…',
+    dither: 'Dithering…', quantize: 'Quantizing…',
+    cache_write: 'Writing cache…', show: 'Pushing to panel…',
+    done: 'Done', failed: 'Failed', idle: 'Idle',
+  };
+  // Total path length of the indicator circle (r=24): 2 * pi * r
+  const SPINNER_CIRC = 2 * Math.PI * 24;
+  function renderProgress() {
+    return {
+      active: false,
+      pct: 0,
+      stageLabel: '',
+      get dashoffset() { return SPINNER_CIRC * (1 - this.pct / 100); },
+      _timer: null,
+      _renderedSwapped: false,
+      _lastImageId: null,
+      init() {
+        this.$el.addEventListener('refresh-start', () => this.begin());
+        // Also kick off polling on initial load in case a refresh was
+        // already running when we navigated in (e.g. server-triggered).
+        this.pollOnce(true);
+      },
+      begin() {
+        this.active = true;
+        this.pct = 1;
+        this.stageLabel = STAGE_LABELS.pick;
+        this._renderedSwapped = false;
+        this.startPolling();
+      },
+      startPolling() {
+        clearInterval(this._timer);
+        this._timer = setInterval(() => this.pollOnce(false), 500);
+      },
+      stopPolling() {
+        clearInterval(this._timer);
+        this._timer = null;
+      },
+      async pollOnce(silent) {
+        try {
+          const r = await fetch('/system/render-status', { cache: 'no-store' });
+          const j = await r.json();
+          const ref = j.refresh || {};
+          if (!silent && !ref.active && !ref.done) return; // nothing happening
+          if (silent && !ref.active && !ref.done) return;
+          // We have a job (active OR just finished — pick up `done` state too).
+          this.active = ref.active || !ref.done;
+          if (ref.progress_pct != null) this.pct = ref.progress_pct;
+          if (ref.stage) this.stageLabel = STAGE_LABELS[ref.stage] || ref.stage;
+          // Early swap: as soon as cache write completed, repoint the
+          // displayed image at the rendered preview. Don't wait for panel push.
+          if (ref.rendered && ref.image_id && !this._renderedSwapped) {
+            this.swapImage(ref.image_id, ref.rendered_at);
+            this._renderedSwapped = true;
+          }
+          if (ref.done) {
+            // Hide overlay shortly after done. Trigger a final fragment
+            // refresh so the caption (path, "shown at") updates.
+            this.active = false;
+            this.stopPolling();
+            if (window.htmx) window.htmx.trigger('#now-showing-fragment', 'load');
+          }
+        } catch (e) { /* ignore transient errors */ }
+      },
+      swapImage(imageId, ts) {
+        const frag = document.getElementById('now-showing-fragment');
+        if (!frag) return;
+        const cb = ts ? new Date(ts).getTime() : Date.now();
+        frag.innerHTML = `
+          <div class="image-frame">
+            <img src="/images/${imageId}/preview.png?cb=${cb}"
+                 alt="Now rendering on the panel" loading="lazy" />
+          </div>
+          <div class="hero-caption">
+            <span class="path">rendering…</span>
+            <span class="when">panel push in progress</span>
+          </div>`;
+      },
+    };
+  }
+</script>
 {% endblock %}

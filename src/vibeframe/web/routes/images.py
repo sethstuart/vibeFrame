@@ -211,9 +211,21 @@ def render_with(
     from vibeframe.config import Settings as _Settings
 
     transient = _Settings(**base)
-    processed = process(Path(img.path), transient, cache=None, sha256=img.sha256)
+    state.preview_tracker.start(image_id, img.path)
+    try:
+        processed = process(
+            Path(img.path),
+            transient,
+            cache=None,
+            sha256=img.sha256,
+            tracker=state.preview_tracker,
+        )
+    except Exception as e:
+        state.preview_tracker.mark_failed(repr(e))
+        raise
     buf = io.BytesIO()
     processed.image.convert("RGB").save(buf, format="PNG")
+    state.preview_tracker.mark_done()
     return Response(content=buf.getvalue(), media_type="image/png")
 
 

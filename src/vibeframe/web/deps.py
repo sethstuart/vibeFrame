@@ -8,6 +8,7 @@ from vibeframe.cache import Cache
 from vibeframe.config import Settings
 from vibeframe.display.base import DisplayDriver
 from vibeframe.library import ImageLibrary
+from vibeframe.progress import RenderTracker
 from vibeframe.scheduler import Scheduler
 
 
@@ -19,6 +20,7 @@ class AppState:
     scheduler: Scheduler
     driver: DisplayDriver
     engine: object
+    preview_tracker: RenderTracker
 
 
 def get_state(request: Request) -> AppState:

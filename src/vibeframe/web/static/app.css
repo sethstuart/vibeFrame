@@ -354,31 +354,7 @@ input[type="range"] {
 .pager .meta { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--text-xs); margin-left: auto; }
 
 /* ──────────────────────────────────────── Home / hero ── */
-/* Two-column at >900px: hero | side (recent + upload). Sized to fit viewport. */
-.home-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-4);
-}
-.home-grid .page-title { grid-column: 1 / -1; }
-.home-grid .quiet-banner { grid-column: 1 / -1; }
-@media (min-width: 900px) {
-  .home-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas:
-      "title title"
-      "quiet quiet"
-      "hero  recent"
-      "actions upload";
-  }
-  .home-grid .page-title { grid-area: title; }
-  .home-grid .quiet-banner { grid-area: quiet; }
-  .home-grid .hero { grid-area: hero; }
-  .home-grid .action-bar { grid-area: actions; }
-  .home-grid .recent-section { grid-area: recent; }
-  .home-grid .upload-section { grid-area: upload; }
-}
-
+/* Single-column vertical stack: page title, hero, actions, recent, upload. */
 .hero {
   position: relative;
   background: var(--surface-raised);
@@ -388,20 +364,15 @@ input[type="range"] {
 }
 .hero .image-frame {
   position: relative;
+  width: 100%;                /* fill #now-showing-fragment width */
+  aspect-ratio: 480 / 800;    /* panel shape; height follows width */
   background: var(--surface-sunken);
   border-radius: var(--radius-xs);
   overflow: hidden;
-  aspect-ratio: 480 / 800;
-  /* Cap the frame so the whole page fits viewport on a desktop screen. */
-  max-height: min(64vh, 520px);
-  margin: 0 auto;
-  width: max-content;
-  max-width: 100%;
   display: flex; align-items: center; justify-content: center;
 }
 .hero .image-frame img {
-  max-width: 100%; max-height: 100%;
-  width: auto; height: 100%;
+  width: 100%; height: 100%;
   object-fit: contain;
   image-rendering: pixelated;
 }
@@ -441,15 +412,10 @@ input[type="range"] {
   fill: none; stroke: var(--accent); stroke-width: 4;
   stroke-linecap: round;
   stroke-dasharray: 150.8;        /* ~ 2π * r (r=24) */
+  /* dashoffset is set inline by JS based on real progress_pct from
+     /system/render-status — no time-based animation here. */
   stroke-dashoffset: 150.8;
-  animation: spinner-fill 36s linear forwards;
-}
-@keyframes spinner-fill {
-  /* Approximates Inky Spectra 6 full-refresh duration; finishes ~ when
-     real swap happens (image refresh kicks new fragment + hides overlay). */
-  0%   { stroke-dashoffset: 150.8; }
-  90%  { stroke-dashoffset: 15;    }
-  100% { stroke-dashoffset: 0;     }
+  transition: stroke-dashoffset var(--dur-normal) var(--ease-out);
 }
 
 /* Drag-drop upload zone */
@@ -537,7 +503,7 @@ input[type="range"] {
   border-radius: var(--radius-pill);
   width: 24px; height: 24px;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--surface-raised);
+  color: var(--spectra-yellow);
   font-size: var(--text-sm);
   border: 0;
 }
@@ -639,62 +605,79 @@ input[type="range"] {
 }
 .live-preview-card img { image-rendering: pixelated; max-width: 100%; max-height: 100%; }
 
-/* Before/after compare slider for the live preview. */
+/* Before/after compare slider — overlay pattern (Zach Patrick style).
+   - `.after` is the bottom image, always visible full-width.
+   - `.before-wrap` is a containing div whose `width` shrinks/grows on drag
+     to reveal more/less of the `.before` image inside (which is sized to
+     match the outer .compare so its position doesn't shift as the wrap
+     width changes).
+   - `.handle` is the draggable accent line + circular knob at the boundary.
+*/
 .compare {
   position: relative;
+  width: 100%;
+  max-width: 480px;
   aspect-ratio: 480 / 800;
-  max-height: 56vh;
   margin: 0 auto;
   background: var(--surface-sunken);
   border-radius: var(--radius-xs);
   overflow: hidden;
-  --pos: 50%;
-  width: max-content; max-width: 100%;
+  user-select: none;
+  touch-action: none;
 }
-.compare img {
+.compare .after,
+.compare .before {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
   object-fit: contain;
   image-rendering: pixelated;
+  display: block;
 }
-.compare .before { z-index: 0; }
-.compare .after  { z-index: 1; clip-path: inset(0 calc(100% - var(--pos)) 0 0); }
-.compare .divider-line {
-  position: absolute; top: 0; bottom: 0; left: var(--pos);
-  width: 2px; background: var(--accent); z-index: 2;
+.compare .after { z-index: 1; }
+.compare .before-wrap {
+  position: absolute; top: 0; left: 0; bottom: 0;
+  width: 50%;                         /* set by JS on drag */
+  overflow: hidden;
+  z-index: 2;
+}
+.compare .before-wrap .before {
+  /* Image is sized by JS (width = .compare's px width) so that as
+     .before-wrap shrinks/grows, the image stays put and only the
+     revealed portion changes — the standard before/after pattern. */
+  position: absolute; top: 0; left: 0; height: 100%;
+  max-width: none;
+}
+.compare .handle {
+  position: absolute; top: 0; bottom: 0; left: 50%;
+  width: 2px; background: var(--accent);
   transform: translateX(-1px);
-  pointer-events: none;
+  z-index: 3;
+  cursor: ew-resize;
+  touch-action: none;
 }
-.compare .divider-line::after {
+.compare .handle::after {
   content: ''; position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%);
-  width: 24px; height: 24px;
+  width: 28px; height: 28px;
   background: var(--accent); border-radius: var(--radius-pill);
   border: var(--border-thick) solid var(--surface-raised);
   box-shadow: var(--shadow-sm);
 }
-.compare .slider {
-  position: absolute; inset: 0;
-  width: 100%; height: 100%;
-  margin: 0; padding: 0; opacity: 0; cursor: ew-resize; z-index: 3;
-}
-.compare-labels {
+.compare .compare-labels {
   position: absolute; top: var(--space-2); left: var(--space-2); right: var(--space-2);
-  display: flex; justify-content: space-between; pointer-events: none;
-  z-index: 2;
+  display: flex; justify-content: space-between;
+  pointer-events: none; z-index: 4;
   font-family: var(--font-mono); font-size: var(--text-2xs);
   letter-spacing: var(--tracking-caps); text-transform: uppercase;
   color: var(--surface-raised);
   text-shadow: 0 1px 2px rgba(0,0,0,0.6);
 }
 
-/* Linear progress bar shown while live preview is rendering. */
+/* Linear preview progress bar — JS-driven determinate <progress>. */
 .preview-progress {
-  display: block;
-  width: 100%; height: 4px;
+  display: block; width: 100%; height: 4px;
   margin-top: var(--space-3);
-  appearance: none;
-  border: 0;
+  appearance: none; border: 0;
   background: var(--surface-sunken);
   border-radius: var(--radius-pill);
   overflow: hidden;
@@ -702,23 +685,12 @@ input[type="range"] {
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 .preview-progress.busy { opacity: 1; }
-.preview-progress::-webkit-progress-bar { background: var(--surface-sunken); }
+.preview-progress::-webkit-progress-bar { background: var(--surface-sunken); border-radius: var(--radius-pill); }
 .preview-progress::-webkit-progress-value {
-  background: var(--accent);
-  border-radius: var(--radius-pill);
+  background: var(--accent); border-radius: var(--radius-pill);
   transition: width var(--dur-normal) var(--ease-out);
 }
 .preview-progress::-moz-progress-bar { background: var(--accent); }
-/* When .busy, treat <progress value="0"> as determinate animation 0 -> 95% */
-.preview-progress.busy::-webkit-progress-value { width: 95%; }
-.preview-progress.busy {
-  --progress-fill: 95%;
-}
-.preview-progress.busy { background: linear-gradient(to right, var(--accent) 0%, var(--accent) 95%, var(--surface-sunken) 95%, var(--surface-sunken) 100%); animation: preview-fill 12s linear forwards; }
-@keyframes preview-fill {
-  0%   { background: linear-gradient(to right, var(--accent) 0%, var(--accent) 0%, var(--surface-sunken) 0%, var(--surface-sunken) 100%); }
-  100% { background: linear-gradient(to right, var(--accent) 0%, var(--accent) 95%, var(--surface-sunken) 95%, var(--surface-sunken) 100%); }
-}
 .settings-save-bar {
   position: sticky; bottom: var(--space-4); margin-top: var(--space-6);
   display: flex; justify-content: flex-end; gap: var(--space-3);

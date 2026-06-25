@@ -11,6 +11,7 @@ from PIL import Image, ImageOps
 from vibeframe.cache import Cache, CacheKey, params_hash
 from vibeframe.config import Settings
 from vibeframe.processor import crop, dither, palette, tonemap
+from vibeframe.progress import STAGE_WEIGHTS, RenderTracker
 from vibeframe.timing import record, timed
 
 try:  # HEIC/HEIF support is optional but desirable.
@@ -85,17 +86,26 @@ def cached_png_bytes(
     return p.read_bytes()
 
 
+def _advance(tracker: RenderTracker | None, name: str) -> None:
+    if tracker is not None:
+        tracker.set_stage(name, STAGE_WEIGHTS.get(name, (0.0, 0.0))[0])
+
+
 def process(
     path: Path,
     settings: Settings,
     cache: Cache | None = None,
     sha256: str | None = None,
+    tracker: RenderTracker | None = None,
 ) -> ProcessedImage:
     """Run the full pipeline for one source image and return a display-ready PIL image.
 
     If `sha256` is supplied (e.g. by the library, which already stores it), we use it
     directly. Otherwise we fall back to (path, mtime, size) so the cache lookup never
     requires reading the source file — only a missed lookup pays the decode cost.
+
+    If `tracker` is supplied, each pipeline stage updates it so the web UI can
+    poll for live progress.
     """
     start = perf_counter()
     target_w, target_h = _target_size(settings.orientation)
@@ -109,6 +119,7 @@ def process(
     key = CacheKey(source_sha256=source_key, params_hash=params_hash(params))
 
     if cache is not None:
+        _advance(tracker, "cache_lookup")
         with timed("pipeline.cache.lookup"):
             cached = cache.get(key)
         if cached is not None:
@@ -116,31 +127,44 @@ def process(
                 path=path, image=Image.open(cached), source_sha256=source_key
             )
             record("pipeline.process.hit", perf_counter() - start)
+            if tracker is not None:
+                tracker.mark_rendered()
+                tracker.set_stage("cache_write", 95.0)
             return result
 
+    _advance(tracker, "decode")
     with timed("pipeline.image.open"):
         with Image.open(path) as img:
             img.load()
+        _advance(tracker, "exif")
         with timed("pipeline.exif.transpose"):
             oriented = ImageOps.exif_transpose(img).convert("RGB")
 
+    _advance(tracker, "crop")
     with timed(f"pipeline.crop.{settings.crop_mode}"):
         cropped = crop.crop_to(oriented, target_w, target_h, settings.crop_mode)
+    _advance(tracker, "tonemap")
     with timed("pipeline.tonemap"):
         toned = tonemap.apply(cropped, settings.saturation, settings.contrast)
 
+    _advance(tracker, "ndarray")
     with timed("pipeline.ndarray"):
         src_array = np.array(toned, dtype=np.uint8)
+    _advance(tracker, "dither")
     with timed(f"pipeline.dither.{settings.dither}"):
         indices = dither.dither(src_array, settings.dither, palette.SPECTRA6)
+    _advance(tracker, "quantize")
     with timed("pipeline.palette.build_p"):
         out = _build_p_image(indices, palette.SPECTRA6)
 
     if cache is not None:
+        _advance(tracker, "cache_write")
         with timed("pipeline.cache.write"):
             buf = BytesIO()
             out.save(buf, format="PNG")
             cache.put_bytes(key, buf.getvalue())
+        if tracker is not None:
+            tracker.mark_rendered()
 
     record("pipeline.process.miss", perf_counter() - start)
     return ProcessedImage(path=path, image=out, source_sha256=source_key)

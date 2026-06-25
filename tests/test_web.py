@@ -10,6 +10,7 @@ from vibeframe.cache import Cache
 from vibeframe.db import build_engine
 from vibeframe.display.mock_driver import MockDriver
 from vibeframe.library import ImageLibrary
+from vibeframe.progress import RenderTracker
 from vibeframe.scheduler import Scheduler
 from vibeframe.web.app import create_app
 from vibeframe.web.deps import AppState
@@ -30,6 +31,7 @@ def _setup(tmp_settings):
         scheduler=scheduler,
         driver=driver,
         engine=engine,
+        preview_tracker=RenderTracker(),
     )
     return create_app(state), library
 

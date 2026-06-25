@@ -13,6 +13,7 @@ from vibeframe.config import get_settings
 from vibeframe.db import build_engine
 from vibeframe.display import build_driver
 from vibeframe.library import ImageLibrary
+from vibeframe.progress import RenderTracker
 from vibeframe.scheduler import Scheduler
 from vibeframe.thumb_warmer import ThumbWarmer
 from vibeframe.watcher import LibraryWatcher
@@ -54,6 +55,7 @@ async def _serve() -> None:
         scheduler=scheduler,
         driver=driver,
         engine=engine,
+        preview_tracker=RenderTracker(),
     )
     app = create_app(state)
 
