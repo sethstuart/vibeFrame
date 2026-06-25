@@ -1,25 +1,60 @@
+{% from "_macros.html" import icon %}
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
   <title>{% block title %}vibeFrame{% endblock %}</title>
+  <link rel="icon" href="/static/logo-mark.svg" />
   <link rel="stylesheet" href="/static/app.css" />
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="https://unpkg.com/alpinejs@3.14.1" defer></script>
+  <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header>
-    <h1><a href="/">vibeFrame</a></h1>
-    <nav>
-      <a href="/">Now showing</a>
-      <a href="/images">Library</a>
-      <a href="/images?favorites_only=true">Favorites</a>
-      <a href="/settings">Settings</a>
-      <a href="/metrics.html">Metrics</a>
+  <header class="app-header">
+    <a class="brand" href="/">
+      <img src="/static/logo-mark.svg" alt="" />
+      <span class="wordmark"><span class="thin">vibe</span><span class="bold">Frame</span></span>
+    </a>
+    <nav class="primary">
+      <a href="/" class="{% if active == 'home' %}active{% endif %}">Now showing</a>
+      <a href="/images" class="{% if active == 'library' %}active{% endif %}">Library</a>
+      <a href="/images?favorites_only=true" class="{% if active == 'favorites' %}active{% endif %}">Favorites</a>
+      <a href="/settings" class="{% if active == 'settings' %}active{% endif %}">Settings</a>
+      <a href="/metrics.html" class="{% if active == 'metrics' %}active{% endif %}">Metrics</a>
     </nav>
+    <div class="header-right">
+      <span hx-get="/system/status-chip" hx-trigger="load, every 10s" hx-swap="outerHTML"
+            class="status-chip"><span class="status-dot"></span><span>…</span></span>
+    </div>
   </header>
-  <main>
+
+  {# Icon sprite: fetched once on first page load (browser-cached) and
+     inlined so <use href="#name"/> resolves without per-icon fetches. #}
+  <div id="icon-sprite-host" hidden></div>
+  <script>
+    (function () {
+      var host = document.getElementById('icon-sprite-host');
+      fetch('/static/icons.svg', { cache: 'force-cache' })
+        .then(function (r) { return r.text(); })
+        .then(function (t) { host.innerHTML = t; });
+    })();
+  </script>
+
+  <main class="app-main">
     {% block body %}{% endblock %}
   </main>
+
+  <nav class="mobile-nav">
+    <ul>
+      <li><a href="/" class="{% if active == 'home' %}active{% endif %}">{{ icon('home', 22) }}Home</a></li>
+      <li><a href="/images" class="{% if active == 'library' %}active{% endif %}">{{ icon('grid', 22) }}Library</a></li>
+      <li><a href="/images?favorites_only=true" class="{% if active == 'favorites' %}active{% endif %}">{{ icon('star', 22) }}Favs</a></li>
+      <li><a href="/settings" class="{% if active == 'settings' %}active{% endif %}">{{ icon('settings', 22) }}Settings</a></li>
+      <li><a href="/metrics.html" class="{% if active == 'metrics' %}active{% endif %}">{{ icon('bar-chart', 22) }}Metrics</a></li>
+    </ul>
+  </nav>
 </body>
 </html>

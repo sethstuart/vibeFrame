@@ -1,14 +1,13 @@
 {% if last_id %}
+<div class="image-frame">
   <img src="/images/{{ last_id }}/thumb.png?v={{ last_shown_ts }}"
-       alt="current image" class="display-preview" loading="lazy" />
-  <p class="path">{{ last_path }}</p>
-  <p class="when">Shown at: {{ last_shown_at }}</p>
-  <p><a href="/images/{{ last_id }}/preview.png" target="_blank">View full panel render</a></p>
+       alt="Currently on the panel" loading="lazy" />
+</div>
+<div class="hero-caption">
+  <span class="path">{{ last_path.split('/')[-1] }}</span>
+  <span class="when">{% if last_shown_at %}shown {{ last_shown_at.strftime('%H:%M:%S UTC') }}{% endif %}</span>
+  <a href="/images/{{ last_id }}/preview.png" target="_blank" class="muted">View panel render →</a>
+</div>
 {% else %}
-  <p>No image displayed yet.</p>
-{% endif %}
-{% if in_quiet %}
-  <p class="quiet">Currently in quiet hours ({{ s.quiet_start }} – {{ s.quiet_end }} {{ s.tz }}).</p>
-{% else %}
-  <p>Next refresh in up to {{ s.refresh_seconds }} seconds.</p>
+<div class="image-frame"><p class="empty">No image displayed yet.</p></div>
 {% endif %}

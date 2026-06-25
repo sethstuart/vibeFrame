@@ -1,0 +1,10 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="vibeFrame">
+  <rect x="3" y="3" width="42" height="42" rx="5" fill="#ffffff" stroke="#1c1c1c" stroke-width="2.5"></rect>
+  <g>
+    <rect x="9" y="9" width="13.5" height="13.5" rx="1.5" fill="#000000"></rect>
+    <rect x="25.5" y="9" width="13.5" height="13.5" rx="1.5" fill="#fff338"></rect>
+    <rect x="9" y="25.5" width="13.5" height="13.5" rx="1.5" fill="#bf0000"></rect>
+    <rect x="25.5" y="25.5" width="6" height="13.5" rx="1.5" fill="#6440ff"></rect>
+    <rect x="33" y="25.5" width="6" height="13.5" rx="1.5" fill="#438a1c"></rect>
+  </g>
+</svg>

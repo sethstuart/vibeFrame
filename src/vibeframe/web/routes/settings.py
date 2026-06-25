@@ -13,10 +13,13 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 @router.get("", response_class=HTMLResponse)
 async def view_settings(request: Request, state: AppState = Depends(get_state)):
+    # Pick the most recent image to drive the live-preview pane; None if empty.
+    recent = state.library.list(limit=1)
+    preview_id = recent[0].id if recent else None
     return request.app.state.templates.TemplateResponse(
         request,
         "settings.html",
-        {"s": state.settings},
+        {"s": state.settings, "preview_id": preview_id},
     )
 
 

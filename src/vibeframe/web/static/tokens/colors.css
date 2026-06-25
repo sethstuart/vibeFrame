@@ -1,0 +1,74 @@
+/* ─────────────────────────────────────────────────────────────
+   vibeFrame · COLOR TOKENS
+   "e-ink editorial" — warm paper, crisp ink, and the Spectra 6
+   hardware palette (the six colours the panel can physically show)
+   as the accent system.
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Spectra 6 — the panel's true palette ──
+     Lifted verbatim from processor/palette.py. These are the only
+     six colours an Inky Impression 7.3" can render. Use them as
+     accents, data colours, and brand marks. */
+  --spectra-black:  #000000;
+  --spectra-white:  #ffffff;
+  --spectra-yellow: #fff338;
+  --spectra-red:    #bf0000;
+  --spectra-blue:   #6440ff;
+  --spectra-green:  #438a1c;
+
+  /* ── Warm neutral ramp (paper → ink) ──
+     The product lives on warm paper, not cold white. */
+  --paper:    #f7f5f0;  /* app background */
+  --paper-2:  #efece4;  /* sunken wells, hovered rows */
+  --raised:   #ffffff;  /* cards, header, sheets */
+
+  --ink-100:  #ebe8e1;  /* hairlines on paper */
+  --ink-200:  #d8d4ca;  /* default border */
+  --ink-300:  #b9b4a8;  /* strong border, disabled text */
+  --ink-400:  #908a7e;
+  --ink-500:  #6b6b6b;  /* muted / secondary text */
+  --ink-700:  #3a3937;  /* strong body */
+  --ink-900:  #1c1c1c;  /* primary text / near-black ink */
+
+  /* ── Interactive accent ──
+     The classic UI blue the real web app ships (distinct from the
+     more saturated Spectra blue used for hardware/data). */
+  --accent:        #1f4ed8;
+  --accent-hover:  #1a42b8;
+  --accent-press:  #163798;
+  --accent-tint:   #eaf0fd;  /* selected backgrounds */
+  --accent-contrast: #ffffff;
+
+  /* ── Status ── (matches the app's toast + metrics palette) */
+  --ok:        #1d5a2c;
+  --ok-bg:     #e8f6ec;
+  --ok-border: #6ab07a;
+  --err:        #7a1f12;
+  --err-bg:     #fdecea;
+  --err-border: #d97766;
+  --warn:       #8a4a00;
+  --warn-bg:    #fdf3e3;
+  --warn-border:#e0b271;
+
+  /* ─────────── SEMANTIC ALIASES (prefer these) ─────────── */
+  --surface-page:    var(--paper);
+  --surface-raised:  var(--raised);
+  --surface-sunken:  var(--paper-2);
+
+  --text-primary:    var(--ink-900);
+  --text-secondary:  var(--ink-700);
+  --text-muted:      var(--ink-500);
+  --text-disabled:   var(--ink-300);
+  --text-link:       var(--accent);
+  --text-on-accent:  var(--accent-contrast);
+
+  --border-subtle:   var(--ink-100);
+  --border-default:  var(--ink-200);
+  --border-strong:   var(--ink-300);
+
+  --focus-ring:      var(--accent);
+
+  /* Highlight wash used behind "now showing" / live readouts */
+  --live-wash: color-mix(in oklab, var(--spectra-yellow) 16%, var(--paper));
+}

@@ -149,13 +149,79 @@ class ImageLibrary:
             if sha and self.cache:
                 self.cache.invalidate_source(sha)
 
-    def list(self, limit: int = 200, offset: int = 0, favorites_only: bool = False) -> list[Image]:
+    def list(
+        self,
+        limit: int = 200,
+        offset: int = 0,
+        favorites_only: bool = False,
+        query: str | None = None,
+        sort: str = "newest",
+    ) -> list[Image]:
         with Session(self.engine) as session:
             stmt = select(Image)
             if favorites_only:
                 stmt = stmt.join(Favorite, Favorite.image_id == Image.id)
-            stmt = stmt.order_by(Image.added_at.desc()).offset(offset).limit(limit)
+            if query:
+                stmt = stmt.where(Image.path.contains(query))  # type: ignore[attr-defined]
+            if sort == "oldest":
+                stmt = stmt.order_by(Image.added_at.asc())
+            elif sort == "name":
+                stmt = stmt.order_by(Image.path.asc())
+            else:
+                stmt = stmt.order_by(Image.added_at.desc())
+            stmt = stmt.offset(offset).limit(limit)
             return list(session.exec(stmt))
+
+    def bulk_favorite(self, image_ids: list[int], favorited: bool) -> int:
+        if not image_ids:
+            return 0
+        n = 0
+        with Session(self.engine) as session:
+            for image_id in image_ids:
+                existing = session.get(Favorite, image_id)
+                if favorited and not existing:
+                    session.add(Favorite(image_id=image_id))
+                    n += 1
+                elif not favorited and existing:
+                    session.delete(existing)
+                    n += 1
+            session.commit()
+        return n
+
+    def bulk_delete(self, image_ids: list[int]) -> int:
+        from pathlib import Path as _P
+
+        n = 0
+        for image_id in image_ids:
+            img = self.get(image_id)
+            if img is None:
+                continue
+            try:
+                _P(img.path).unlink(missing_ok=True)
+            except OSError:
+                pass
+            self.remove_path(_P(img.path))
+            n += 1
+        return n
+
+    def recent_shown(self, limit: int = 12) -> list[tuple[Image, str]]:
+        """Return recently displayed (Image, shown_at_iso) pairs."""
+        with Session(self.engine) as session:
+            from sqlmodel import select as _select
+            rows = session.exec(
+                _select(History, Image)
+                .join(Image, Image.id == History.image_id)
+                .order_by(History.shown_at.desc())
+                .limit(limit)
+            )
+            seen: set[int] = set()
+            out: list[tuple[Image, str]] = []
+            for hist, img in rows:
+                if img.id in seen:
+                    continue
+                seen.add(img.id or 0)
+                out.append((img, hist.shown_at.isoformat()))
+            return out
 
     def get(self, image_id: int) -> Image | None:
         with Session(self.engine) as session:

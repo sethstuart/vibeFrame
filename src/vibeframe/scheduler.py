@@ -75,6 +75,10 @@ class Scheduler:
         self._last_path: str | None = None
         self._last_shown_at: datetime | None = None
         self._stop = asyncio.Event()
+        # One-shot override consulted by _pick_next. Cleared after use.
+        self._next_override: int | None = None
+        self._busy = False
+        self._next_due_at: datetime | None = None
 
     async def run(self) -> None:
         log.info(
@@ -87,6 +91,7 @@ class Scheduler:
         )
         while not self._stop.is_set():
             await self._step()
+            self._next_due_at = datetime.now(UTC) + _td_seconds(self.settings.refresh_seconds)
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.kick.wait(), timeout=self.settings.refresh_seconds)
             self.kick.clear()
@@ -102,7 +107,11 @@ class Scheduler:
             return
 
         with timed("scheduler.pick_next"):
-            image_id = _pick_next(self.library, self.settings.selection_mode, self._last_path)
+            if self._next_override is not None:
+                image_id = self._next_override
+                self._next_override = None
+            else:
+                image_id = _pick_next(self.library, self.settings.selection_mode, self._last_path)
         if image_id is None:
             log.info("no images available to display")
             return
@@ -110,6 +119,7 @@ class Scheduler:
         if img is None:
             return
 
+        self._busy = True
         try:
             loop = asyncio.get_running_loop()
             processed = await loop.run_in_executor(
@@ -118,7 +128,9 @@ class Scheduler:
             await loop.run_in_executor(None, self.driver.show, processed.image)
         except Exception:
             log.exception("failed to render/show image %s", img.path)
+            self._busy = False
             return
+        self._busy = False
 
         record_show(self.engine, image_id)
         self._last_path = img.path
@@ -130,6 +142,11 @@ class Scheduler:
         self._stop.set()
         self.kick.set()
 
+    def show_now(self, image_id: int) -> None:
+        """Queue a specific image to be the next refresh and kick the loop."""
+        self._next_override = image_id
+        self.kick.set()
+
     @property
     def last_path(self) -> str | None:
         return self._last_path
@@ -137,3 +154,17 @@ class Scheduler:
     @property
     def last_shown_at(self) -> datetime | None:
         return self._last_shown_at
+
+    @property
+    def busy(self) -> bool:
+        return self._busy
+
+    @property
+    def next_due_at(self) -> datetime | None:
+        return self._next_due_at
+
+
+def _td_seconds(seconds: float):
+    from datetime import timedelta
+
+    return timedelta(seconds=seconds)

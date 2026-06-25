@@ -1,0 +1,62 @@
+/* ─────────────────────────────────────────────────────────────
+   vibeFrame · SPACING, RADII, BORDERS, SHADOWS, MOTION
+   4px base grid. Restrained e-ink radii (the panel itself is
+   sharp-cornered) and soft, low paper shadows.
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Spacing (4px base) ── */
+  --space-0:  0;
+  --space-1:  0.25rem;  /*  4px */
+  --space-2:  0.5rem;   /*  8px */
+  --space-3:  0.75rem;  /* 12px */
+  --space-4:  1rem;     /* 16px */
+  --space-5:  1.25rem;  /* 20px */
+  --space-6:  1.5rem;   /* 24px */
+  --space-8:  2rem;     /* 32px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-16: 4rem;     /* 64px */
+  --space-20: 5rem;     /* 80px */
+
+  /* ── Radii ── e-ink restraint: small, crisp corners */
+  --radius-xs:   2px;
+  --radius-sm:   4px;   /* default — matches the app's .card */
+  --radius-md:   6px;
+  --radius-lg:   10px;
+  --radius-xl:   16px;
+  --radius-pill: 999px;
+
+  /* ── Border widths ── */
+  --border-hair:  1px;
+  --border-thick: 2px;
+
+  /* ── Shadows ── warm-toned, low, paper-like (never blue/black glow) */
+  --shadow-xs: 0 1px 2px rgba(40, 34, 24, 0.06);
+  --shadow-sm: 0 1px 3px rgba(40, 34, 24, 0.08), 0 1px 2px rgba(40, 34, 24, 0.05);
+  --shadow-md: 0 4px 12px rgba(40, 34, 24, 0.09), 0 1px 3px rgba(40, 34, 24, 0.06);
+  --shadow-lg: 0 12px 32px rgba(40, 34, 24, 0.12), 0 2px 6px rgba(40, 34, 24, 0.07);
+  --shadow-inset: inset 0 1px 2px rgba(40, 34, 24, 0.08);
+
+  /* Focus ring */
+  --ring-width: 3px;
+  --ring-color: color-mix(in oklab, var(--accent) 35%, transparent);
+
+  /* ── Layout ── */
+  --container-max: 1100px;   /* matches the app's main width */
+  --header-height: 60px;
+
+  /* ── Z-index scale ── */
+  --z-base:     1;
+  --z-sticky:   100;
+  --z-overlay:  500;
+  --z-modal:    1000;
+  --z-toast:    1500;
+
+  /* ── Motion ── crisp, short, no bounce. Echoes e-ink's deliberate refresh. */
+  --ease-out:   cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in-out:cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast:   120ms;
+  --dur-normal: 200ms;
+  --dur-slow:   320ms;
+}

@@ -1,18 +1,43 @@
 {% extends "base.html" %}
+{% from "_macros.html" import status_tile %}
+{% set active = 'metrics' %}
 {% block title %}Metrics — vibeFrame{% endblock %}
 {% macro col(key, label) -%}
   <a href="?sort={{ key }}" class="{% if sort == key %}active{% endif %}">{{ label }}{% if sort == key %} ▼{% endif %}</a>
 {%- endmacro %}
 {% block body %}
-<h2>Metrics
-  <form action="/metrics/clear" method="post" style="display:inline; margin-left:1rem;">
-    <button type="submit" class="secondary">Reset</button>
+<section class="page-title">
+  <h1>Metrics</h1>
+  <span class="subtitle">window: last 256 samples per stage</span>
+</section>
+
+<section class="status-tiles">
+  {{ status_tile('Tracked stages', rows|length) }}
+  {{ status_tile('Slow rows', rows|selectattr('p95_ms', 'gt', 1000)|list|length, unit='p95 > 1s') }}
+  <form action="/metrics/clear" method="post" style="display:contents;">
+    <button type="submit" class="card padded status-tile" style="cursor:pointer; text-align:left;">
+      <div class="label">Action</div>
+      <div class="value" style="font-size:var(--text-md);">Reset metrics</div>
+    </button>
   </form>
-</h2>
-<p class="muted">Lifetime count + last-256-sample window. Rows with p95 &gt; 1s are highlighted.</p>
+</section>
+
 {% if not rows %}
-<p>No metrics recorded yet. Trigger some traffic and refresh.</p>
+<p class="muted">No metrics recorded yet. Trigger some traffic and refresh.</p>
 {% else %}
+{# Group rows by stage prefix (first dotted segment, "http" detected separately). #}
+{% set groups = namespace(buckets={}) %}
+{% for r in rows %}
+  {% if r.name.startswith('http.') %}{% set _ = groups.buckets.setdefault('HTTP', []).append(r) %}
+  {% elif r.name.startswith('pipeline.') %}{% set _ = groups.buckets.setdefault('Pipeline', []).append(r) %}
+  {% elif r.name.startswith('library.') %}{% set _ = groups.buckets.setdefault('Library', []).append(r) %}
+  {% elif r.name.startswith('driver.') %}{% set _ = groups.buckets.setdefault('Display', []).append(r) %}
+  {% elif r.name.startswith('thumb.') %}{% set _ = groups.buckets.setdefault('Thumbs', []).append(r) %}
+  {% elif r.name.startswith('scheduler.') %}{% set _ = groups.buckets.setdefault('Scheduler', []).append(r) %}
+  {% else %}{% set _ = groups.buckets.setdefault('Other', []).append(r) %}
+  {% endif %}
+{% endfor %}
+
 <table class="metrics">
   <thead>
     <tr>
@@ -27,17 +52,20 @@
     </tr>
   </thead>
   <tbody>
-    {% for r in rows %}
-    <tr class="{% if r.p95_ms > 1000 %}slow{% endif %}">
-      <td class="name">{{ r.name }}</td>
-      <td>{{ r.count }}</td>
-      <td>{{ '%.2f'|format(r.mean_ms) }}</td>
-      <td>{{ '%.2f'|format(r.p50_ms) }}</td>
-      <td>{{ '%.2f'|format(r.p95_ms) }}</td>
-      <td>{{ '%.2f'|format(r.max_ms) }}</td>
-      <td>{{ '%.2f'|format(r.last_ms) }}</td>
-      <td>{{ '%.2f'|format(r.total_seconds) }}</td>
-    </tr>
+    {% for group_name, group_rows in groups.buckets.items() %}
+      <tr class="group-header"><td colspan="8">{{ group_name }}</td></tr>
+      {% for r in group_rows %}
+      <tr class="{% if r.p95_ms > 1000 %}slow{% endif %}">
+        <td class="name">{{ r.name }}</td>
+        <td>{{ r.count }}</td>
+        <td>{{ '%.2f'|format(r.mean_ms) }}</td>
+        <td>{{ '%.2f'|format(r.p50_ms) }}</td>
+        <td>{{ '%.2f'|format(r.p95_ms) }}</td>
+        <td>{{ '%.2f'|format(r.max_ms) }}</td>
+        <td>{{ '%.2f'|format(r.last_ms) }}</td>
+        <td>{{ '%.2f'|format(r.total_seconds) }}</td>
+      </tr>
+      {% endfor %}
     {% endfor %}
   </tbody>
 </table>

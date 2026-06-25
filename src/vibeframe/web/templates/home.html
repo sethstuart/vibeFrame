@@ -1,29 +1,79 @@
 {% extends "base.html" %}
+{% from "_macros.html" import button, icon_button, icon %}
+{% set active = 'home' %}
 {% block body %}
-<section class="now-showing">
-  <h2>Now showing</h2>
+<section class="page-title">
+  <h1>Now showing</h1>
+  <span class="subtitle">vibeFrame · {{ s.orientation }}° · {{ s.refresh_seconds }}s refresh</span>
+</section>
+
+{% if in_quiet %}
+<div class="quiet-banner">
+  <span class="status-dot warn"></span>
+  Quiet hours active — refreshes paused {{ s.quiet_start }}–{{ s.quiet_end }} {{ s.tz }}.
+</div>
+{% endif %}
+
+<section class="hero stack-lg">
   <div id="now-showing-fragment"
        hx-get="/system/now-showing"
-       hx-trigger="load delay:30s, every 30s"
+       hx-trigger="every 30s"
        hx-swap="innerHTML">
     {% include "_now_showing.html" %}
   </div>
+</section>
+
+<section class="action-bar">
   <form hx-post="/system/next" hx-swap="none"
         hx-on::after-request="htmx.trigger('#now-showing-fragment', 'load')">
-    <button type="submit">Show next now</button>
+    {{ button('Show next now', variant='primary', icon_name='skip-forward', type='submit') }}
+  </form>
+  <form hx-post="/system/test-pattern" hx-swap="none">
+    {{ button('Show test pattern', variant='secondary', icon_name='zap', type='submit') }}
   </form>
 </section>
 
-<section class="upload">
-  <h2>Upload</h2>
-  <form hx-post="/images/upload"
-        hx-encoding="multipart/form-data"
-        hx-target="#upload-result"
-        hx-swap="innerHTML"
-        hx-on::after-request="if(event.detail.successful) this.reset()">
-    <input type="file" name="files" accept="image/*" multiple required />
-    <button type="submit">Upload to NFS</button>
-  </form>
+<section class="stack">
+  <h2 class="eyebrow">Recently shown</h2>
+  <div class="recent-strip"
+       hx-get="/system/recent" hx-trigger="load, every 60s" hx-swap="innerHTML">
+    {# Populated by HTMX from /system/recent JSON via the inline script below. #}
+  </div>
+  <script>
+    // Render the recent strip from JSON because HTMX swaps replace innerHTML
+    // and we want richer markup. Re-runs on every poll.
+    document.body.addEventListener('htmx:afterSwap', (ev) => {
+      const t = ev.target;
+      if (!t.classList.contains('recent-strip')) return;
+      let data; try { data = JSON.parse(t.textContent); } catch { return; }
+      t.innerHTML = data.map(r =>
+        `<a class="recent-card" href="#" title="${r.name}"
+            hx-post="/images/${r.id}/show" hx-swap="none">
+           <img src="${r.thumb}" alt="${r.name}" loading="lazy" />
+         </a>`
+      ).join('');
+      if (window.htmx) window.htmx.process(t);
+    });
+  </script>
+</section>
+
+<section class="stack">
+  <h2 class="eyebrow">Upload to NFS</h2>
+  <div class="drop-zone" x-data="dropzone" x-ref="zone"
+       :class="dragOver ? 'drag-over' : ''">
+    <form x-ref="form"
+          hx-post="/images/upload"
+          hx-encoding="multipart/form-data"
+          hx-target="#upload-result"
+          hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful) this.reset()">
+      <input x-ref="input" type="file" name="files" accept="image/*" multiple hidden
+             @change="$refs.form.requestSubmit()" />
+      <p>Drop image files here, or
+        <span class="pick" @click="$refs.input.click()">browse</span>
+      </p>
+    </form>
+  </div>
   <div id="upload-result" aria-live="polite"></div>
 </section>
 {% endblock %}

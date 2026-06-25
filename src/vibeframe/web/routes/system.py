@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import io
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, Response
@@ -12,6 +12,31 @@ from vibeframe.scheduler import is_quiet
 from vibeframe.web.deps import AppState, get_state, require_token
 
 router = APIRouter(tags=["system"])
+
+
+def _system_status(state: AppState) -> dict:
+    now_local = datetime.now(tz=state.settings.zoneinfo)
+    in_quiet = is_quiet(now_local, state.settings.quiet_start, state.settings.quiet_end)
+    next_due = state.scheduler.next_due_at
+    if state.scheduler.busy:
+        kind = "busy"
+        label = "Refreshing…"
+    elif in_quiet:
+        kind = "warn"
+        label = "Quiet hours"
+    elif next_due is not None:
+        delta = max(0, int((next_due - datetime.now(UTC)).total_seconds()))
+        kind = "live"
+        if delta < 60:
+            label = f"Next in {delta}s"
+        elif delta < 3600:
+            label = f"Next in {delta // 60}m"
+        else:
+            label = f"Next in {delta // 3600}h{(delta % 3600) // 60:02d}m"
+    else:
+        kind = "live"
+        label = "Idle"
+    return {"kind": kind, "label": label, "in_quiet": in_quiet}
 
 
 def _now_showing_context(state: AppState) -> dict:
@@ -63,6 +88,34 @@ async def now_showing_fragment(request: Request, state: AppState = Depends(get_s
 @router.get("/healthz")
 async def healthz():
     return {"ok": True}
+
+
+@router.get("/system/status")
+def system_status_json(state: AppState = Depends(get_state)):
+    return _system_status(state)
+
+
+@router.get("/system/status-chip", response_class=HTMLResponse)
+def system_status_chip(request: Request, state: AppState = Depends(get_state)):
+    return request.app.state.templates.TemplateResponse(
+        request, "_status_chip.html", _system_status(state)
+    )
+
+
+@router.get("/system/recent")
+def system_recent(limit: int = 12, state: AppState = Depends(get_state)):
+    pairs = state.library.recent_shown(limit=limit)
+    from pathlib import Path as _P
+    return [
+        {
+            "id": img.id,
+            "name": _P(img.path).name,
+            "path": img.path,
+            "thumb": f"/images/{img.id}/thumb.png",
+            "shown_at": shown_at,
+        }
+        for img, shown_at in pairs
+    ]
 
 
 @router.post("/system/next", dependencies=[Depends(require_token)])

@@ -47,6 +47,8 @@ async def list_images(
     favorites_only: bool = False,
     limit: int = PAGE_SIZE_DEFAULT,
     offset: int = 0,
+    q: str | None = None,
+    sort: str = "newest",
     state: AppState = Depends(get_state),
 ):
     limit = max(1, min(limit, PAGE_SIZE_MAX))
@@ -54,7 +56,9 @@ async def list_images(
     total = state.library.count(favorites_only=favorites_only)
     total_pages = max(1, (total + limit - 1) // limit) if total else 1
     current_page = offset // limit + 1
-    images = state.library.list(limit=limit, offset=offset, favorites_only=favorites_only)
+    images = state.library.list(
+        limit=limit, offset=offset, favorites_only=favorites_only, query=q, sort=sort
+    )
     favorite_ids = set(state.library.all_ids(favorites_only=True))
     return request.app.state.templates.TemplateResponse(
         request,
@@ -69,6 +73,8 @@ async def list_images(
             "current_page": current_page,
             "total_pages": total_pages,
             "page_numbers": _page_numbers(current_page, total_pages),
+            "q": q or "",
+            "sort": sort,
         },
     )
 
@@ -139,6 +145,67 @@ def preview(image_id: int, state: AppState = Depends(get_state)):
     return Response(
         content=buf.getvalue(), media_type="image/png", headers=THUMB_CACHE_HEADERS
     )
+
+
+@router.post("/{image_id}/show", dependencies=[Depends(require_token)])
+def show_now(image_id: int, state: AppState = Depends(get_state)):
+    img = state.library.get(image_id)
+    if not img:
+        raise HTTPException(status_code=404, detail="not found")
+    state.scheduler.show_now(image_id)
+    return {"queued": image_id}
+
+
+@router.post("/bulk/favorite", dependencies=[Depends(require_token)])
+def bulk_favorite(payload: dict, state: AppState = Depends(get_state)):
+    ids = payload.get("ids") or []
+    favorited = bool(payload.get("favorited", True))
+    n = state.library.bulk_favorite([int(i) for i in ids], favorited)
+    return {"changed": n}
+
+
+@router.post("/bulk/delete", dependencies=[Depends(require_token)])
+def bulk_delete(payload: dict, state: AppState = Depends(get_state)):
+    ids = payload.get("ids") or []
+    n = state.library.bulk_delete([int(i) for i in ids])
+    return {"deleted": n}
+
+
+@router.get("/{image_id}/render-with.png")
+def render_with(
+    image_id: int,
+    dither: str | None = None,
+    crop_mode: str | None = None,
+    saturation: float | None = None,
+    contrast: float | None = None,
+    orientation: int | None = None,
+    state: AppState = Depends(get_state),
+):
+    """Preview the pipeline using ad-hoc settings (no DB write, no cache write
+    on miss — caller passes hypotheticals for the Settings page slider preview).
+    """
+    img = state.library.get(image_id)
+    if not img:
+        raise HTTPException(status_code=404, detail="not found")
+    # Build a transient Settings copy with any overrides applied.
+    base = state.settings.model_dump()
+    if dither is not None:
+        base["dither"] = dither
+    if crop_mode is not None:
+        base["crop_mode"] = crop_mode
+    if saturation is not None:
+        base["saturation"] = saturation
+    if contrast is not None:
+        base["contrast"] = contrast
+    if orientation is not None:
+        base["orientation"] = orientation
+    from vibeframe.config import Settings as _Settings
+
+    transient = _Settings(**base)
+    processed = process(Path(img.path), transient, cache=None, sha256=img.sha256)
+    buf = io.BytesIO()
+    processed.image.convert("RGB").save(buf, format="PNG")
+    return Response(content=buf.getvalue(), media_type="image/png")
 
 
 @router.get("/{image_id}/thumb.png")

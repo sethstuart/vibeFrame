@@ -1,59 +1,76 @@
 {% extends "base.html" %}
+{% from "_macros.html" import field, select_input, slider, button, spectra_strip %}
+{% set active = 'settings' %}
 {% block body %}
-<h2>Settings</h2>
-<form method="post" action="/settings">
-  <label>Orientation
-    <select name="orientation">
-      {% for opt in [0, 90, 180, 270] %}
-        <option value="{{ opt }}" {% if s.orientation == opt %}selected{% endif %}>{{ opt }}°</option>
-      {% endfor %}
-    </select>
-  </label>
+<section class="page-title">
+  <h1>Settings</h1>
+  <span class="subtitle">all values persist via <code>POST /settings</code></span>
+</section>
 
-  <label>Refresh interval (seconds)
-    <input type="number" name="refresh_seconds" min="10" value="{{ s.refresh_seconds }}" />
-  </label>
+<form method="post" action="/settings" class="settings-grid"
+      x-data="{ preview_id: {{ preview_id|tojson if preview_id is defined else 'null' }} }">
 
-  <label>Selection mode
-    <select name="selection_mode">
-      {% for opt in ["shuffle", "sequential", "favorites", "recent"] %}
-        <option value="{{ opt }}" {% if s.selection_mode == opt %}selected{% endif %}>{{ opt }}</option>
-      {% endfor %}
-    </select>
-  </label>
+  <div class="stack-lg">
+    <div class="settings-section">
+      <h3>Display</h3>
+      {% call field('Orientation', 'orientation') %}
+        {{ select_input('orientation', [(0, '0°'), (90, '90°'), (180, '180°'), (270, '270°')], current=s.orientation) }}
+      {% endcall %}
+      {% call field('Crop mode', 'crop_mode', help='Smart uses OpenCV saliency; center/fit are deterministic.') %}
+        {{ select_input('crop_mode', ['smart', 'center', 'fit'], current=s.crop_mode) }}
+      {% endcall %}
+      {% call field('Dither algorithm', 'dither', help='Floyd-Steinberg & Atkinson diffuse error per pixel; Bayer is ordered.') %}
+        {{ select_input('dither', ['floyd-steinberg', 'atkinson', 'bayer', 'none'], current=s.dither) }}
+      {% endcall %}
+    </div>
 
-  <label>Dither
-    <select name="dither">
-      {% for opt in ["floyd-steinberg", "atkinson", "bayer", "none"] %}
-        <option value="{{ opt }}" {% if s.dither == opt %}selected{% endif %}>{{ opt }}</option>
-      {% endfor %}
-    </select>
-  </label>
+    <div class="settings-section">
+      <h3>Tone</h3>
+      {% call field('Saturation', 'saturation') %}
+        {{ slider('saturation', s.saturation, 0, 3, 0.05) }}
+      {% endcall %}
+      {% call field('Contrast', 'contrast') %}
+        {{ slider('contrast', s.contrast, 0, 3, 0.05) }}
+      {% endcall %}
+      {{ spectra_strip() }}
+    </div>
 
-  <label>Crop mode
-    <select name="crop_mode">
-      {% for opt in ["smart", "center", "fit"] %}
-        <option value="{{ opt }}" {% if s.crop_mode == opt %}selected{% endif %}>{{ opt }}</option>
-      {% endfor %}
-    </select>
-  </label>
+    <div class="settings-section">
+      <h3>Schedule</h3>
+      {% call field('Refresh interval', 'refresh_seconds', help='Seconds between automatic refreshes.') %}
+        <input id="refresh_seconds" name="refresh_seconds" type="number" min="10" value="{{ s.refresh_seconds }}" class="text-input" />
+      {% endcall %}
+      {% call field('Selection mode', 'selection_mode') %}
+        {{ select_input('selection_mode', ['shuffle', 'sequential', 'favorites', 'recent'], current=s.selection_mode) }}
+      {% endcall %}
+      {% call field('Quiet hours start', 'quiet_start') %}
+        <input id="quiet_start" name="quiet_start" type="time" value="{{ s.quiet_start.strftime('%H:%M') }}" class="text-input" />
+      {% endcall %}
+      {% call field('Quiet hours end', 'quiet_end') %}
+        <input id="quiet_end" name="quiet_end" type="time" value="{{ s.quiet_end.strftime('%H:%M') }}" class="text-input" />
+      {% endcall %}
+    </div>
+  </div>
 
-  <label>Saturation
-    <input type="number" step="0.05" min="0" max="3" name="saturation" value="{{ s.saturation }}" />
-  </label>
+  <aside class="stack">
+    <h3 class="eyebrow">Live preview</h3>
+    <div class="card padded live-preview-card">
+      <div class="image-frame">
+        {% if preview_id %}
+          <img src="/images/{{ preview_id }}/preview.png" alt="Pipeline preview" loading="lazy" />
+        {% else %}
+          <p class="muted mono">Upload an image to see a live preview.</p>
+        {% endif %}
+      </div>
+      <p class="muted" style="margin-top: var(--space-3); font-size: var(--text-xs);">
+        Reflects saved settings. Save changes to update.
+      </p>
+    </div>
+  </aside>
 
-  <label>Contrast
-    <input type="number" step="0.05" min="0" max="3" name="contrast" value="{{ s.contrast }}" />
-  </label>
-
-  <label>Quiet hours start ({{ s.tz }})
-    <input type="time" name="quiet_start" value="{{ s.quiet_start.strftime('%H:%M') }}" />
-  </label>
-
-  <label>Quiet hours end ({{ s.tz }})
-    <input type="time" name="quiet_end" value="{{ s.quiet_end.strftime('%H:%M') }}" />
-  </label>
-
-  <button type="submit">Save</button>
+  <div class="settings-save-bar" style="grid-column: 1 / -1;">
+    {{ button('Reset', variant='ghost', type='reset') }}
+    {{ button('Save', variant='primary', icon_name='check', type='submit') }}
+  </div>
 </form>
 {% endblock %}

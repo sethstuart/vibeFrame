@@ -1,43 +1,93 @@
 {% extends "base.html" %}
+{% from "_macros.html" import tag, icon_button, button, icon %}
+{% set active = 'favorites' if favorites_only else 'library' %}
 {% macro page_url(page) -%}
-  ?offset={{ (page - 1) * limit }}&limit={{ limit }}{% if favorites_only %}&favorites_only=true{% endif %}
+  ?offset={{ (page - 1) * limit }}&limit={{ limit }}{% if favorites_only %}&favorites_only=true{% endif %}{% if q %}&q={{ q }}{% endif %}{% if sort and sort != 'newest' %}&sort={{ sort }}{% endif %}
 {%- endmacro %}
 {% block body %}
-<h2>{% if favorites_only %}Favorites{% else %}Library{% endif %}
-  <span class="count">({{ total }} {% if total == 1 %}image{% else %}images{% endif %})</span>
-</h2>
-<div class="grid">
-  {% for img in images %}
-    <figure class="card">
-      <img src="/images/{{ img.id }}/thumb.png" alt="{{ img.path }}" loading="lazy" />
-      <figcaption>
-        <span class="filename">{{ img.path.split('/')[-1] }}</span>
+<div x-data="selection">
+  <section class="library-header">
+    <h1>{% if favorites_only %}Favorites{% else %}Library{% endif %}
+      <span class="count">{{ total }} {% if total == 1 %}image{% else %}images{% endif %}</span>
+    </h1>
+    <div class="cluster">
+      <button class="btn btn-secondary sm" @click="toggleMode()">
+        <span x-show="!mode">Select</span>
+        <span x-show="mode" x-cloak>Done</span>
+      </button>
+    </div>
+  </section>
+
+  <form method="get" action="/images" class="filter-bar">
+    <div class="filter-tags">
+      {{ tag('All', href='/images?sort=' + sort, active=not favorites_only) }}
+      {{ tag('Favorites', href='/images?favorites_only=true&sort=' + sort, active=favorites_only) }}
+    </div>
+    <div class="filter-controls">
+      <input type="search" name="q" value="{{ q }}" placeholder="Search filename…" />
+      <select name="sort" class="select-input" onchange="this.form.submit()">
+        <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest</option>
+        <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>Oldest</option>
+        <option value="name" {% if sort == 'name' %}selected{% endif %}>Name</option>
+      </select>
+      {% if favorites_only %}<input type="hidden" name="favorites_only" value="true" />{% endif %}
+      <button type="submit" class="btn btn-secondary sm">Apply</button>
+    </div>
+  </form>
+
+  <div class="photo-grid" :class="mode ? 'is-select-mode' : ''">
+    {% for img in images %}
+    <article class="photo-card" :class="has({{ img.id }}) ? 'selected' : ''">
+      <div class="thumb-wrap">
+        {% if img.id in favorite_ids %}
+        <span class="favorite-badge" aria-hidden="true">★</span>
+        {% endif %}
+        <span class="select-toggle" @click="toggle({{ img.id }})"></span>
+        <img src="/images/{{ img.id }}/thumb.png" alt="{{ img.path }}" loading="lazy" />
         <div class="actions">
           {% if img.id in favorite_ids %}
-            <button hx-delete="/favorites/{{ img.id }}" hx-swap="none">★ Unfavorite</button>
+            {{ icon_button('star-filled', 'Unfavorite', extra='hx-delete="/favorites/' ~ img.id ~ '" hx-swap="none"') }}
           {% else %}
-            <button hx-post="/favorites/{{ img.id }}" hx-swap="none">☆ Favorite</button>
+            {{ icon_button('star', 'Favorite', extra='hx-post="/favorites/' ~ img.id ~ '" hx-swap="none"') }}
           {% endif %}
-          <a href="/images/{{ img.id }}/preview.png" target="_blank">Preview</a>
-          <button hx-delete="/images/{{ img.id }}" hx-swap="none"
-                  hx-confirm="Delete {{ img.path }} from NFS?">Delete</button>
+          {{ icon_button('skip-forward', 'Show now', extra='hx-post="/images/' ~ img.id ~ '/show" hx-swap="none"') }}
+          {{ icon_button('trash', 'Delete', variant='danger', extra='hx-delete="/images/' ~ img.id ~ '" hx-confirm="Delete ' ~ img.path ~ ' from NFS?" hx-swap="none"') }}
         </div>
-      </figcaption>
-    </figure>
-  {% else %}
-    <p>No images.</p>
-  {% endfor %}
+      </div>
+      <div class="meta">
+        <span class="filename">{{ img.path.split('/')[-1] }}</span>
+      </div>
+    </article>
+    {% else %}
+    <p class="muted">No images.</p>
+    {% endfor %}
+  </div>
+
+  <!-- Bulk action bar (only visible in selection mode with selections) -->
+  <div class="bulk-bar" x-show="mode && count > 0" x-cloak>
+    <span class="count" x-text="count + (count === 1 ? ' selected' : ' selected')"></span>
+    <button class="btn btn-secondary sm"
+            @click="fetch('/images/bulk/favorite', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: list(), favorited: true})}).then(()=>{clear(); location.reload();})">
+      Favorite
+    </button>
+    <button class="btn btn-secondary sm"
+            @click="fetch('/images/bulk/favorite', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: list(), favorited: false})}).then(()=>{clear(); location.reload();})">
+      Unfavorite
+    </button>
+    <button class="btn btn-danger sm"
+            @click="if(confirm('Delete '+count+' images from NFS?')) fetch('/images/bulk/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: list()})}).then(()=>{clear(); location.reload();})">
+      Delete
+    </button>
+  </div>
 </div>
+
 {% if total_pages > 1 %}
-<nav class="pager">
+<nav class="pager" style="margin-top: var(--space-6);">
   {% if current_page > 1 %}<a href="{{ page_url(current_page - 1) }}">← Prev</a>{% endif %}
   {% for p in page_numbers %}
-    {% if p is none %}
-      <span class="gap">…</span>
-    {% elif p == current_page %}
-      <span class="current">{{ p }}</span>
-    {% else %}
-      <a href="{{ page_url(p) }}">{{ p }}</a>
+    {% if p is none %}<span class="gap">…</span>
+    {% elif p == current_page %}<span class="current">{{ p }}</span>
+    {% else %}<a href="{{ page_url(p) }}">{{ p }}</a>
     {% endif %}
   {% endfor %}
   {% if current_page < total_pages %}<a href="{{ page_url(current_page + 1) }}">Next →</a>{% endif %}

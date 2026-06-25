@@ -1,0 +1,92 @@
+{# vibeFrame Jinja macros — re-implementations of the design system's React
+   components (Button, IconButton, Badge, Tag, Card, StatusDot, SpectraStrip,
+   Field, TextInput, Select, Toast, Pager). All styling lives in app.css
+   classes; macros stay logic-light. #}
+
+{% macro icon(name, size=18) -%}
+<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <use href="/static/icons.svg#{{ name }}"/>
+</svg>
+{%- endmacro %}
+
+{% macro button(label, variant='primary', size='md', icon_name=None, type='button', extra='') %}
+<button type="{{ type }}" class="btn btn-{{ variant }}{% if size == 'sm' %} sm{% endif %}" {{ extra|safe }}>
+  {% if icon_name %}{{ icon(icon_name, 16) }}{% endif %}
+  <span>{{ label }}</span>
+</button>
+{% endmacro %}
+
+{% macro icon_button(icon_name, label, variant='', size='md', extra='') %}
+<button type="button" class="icon-btn{% if size == 'lg' %} lg{% endif %}{% if variant %} {{ variant }}{% endif %}" aria-label="{{ label }}" title="{{ label }}" {{ extra|safe }}>
+  {{ icon(icon_name, 18 if size != 'lg' else 22) }}
+</button>
+{% endmacro %}
+
+{% macro badge(text, variant='') -%}
+<span class="badge{% if variant %} {{ variant }}{% endif %}">{{ text }}</span>
+{%- endmacro %}
+
+{% macro tag(label, href=None, active=False, variant='', extra='') %}
+{% if href %}<a href="{{ href }}" class="tag{% if active %} active{% endif %}{% if variant %} {{ variant }}{% endif %}" {{ extra|safe }}>{{ label }}</a>
+{% else %}<button type="button" class="tag{% if active %} active{% endif %}{% if variant %} {{ variant }}{% endif %}" {{ extra|safe }}>{{ label }}</button>
+{% endif %}
+{% endmacro %}
+
+{% macro status_dot(state='idle') -%}
+<span class="status-dot {{ state }}" aria-hidden="true"></span>
+{%- endmacro %}
+
+{% macro spectra_strip() %}
+<span class="spectra-strip" aria-hidden="true">
+  <span class="s-black"></span><span class="s-white"></span><span class="s-yellow"></span>
+  <span class="s-red"></span><span class="s-blue"></span><span class="s-green"></span>
+</span>
+{% endmacro %}
+
+{% macro field(label, name, help=None) %}
+<div class="field">
+  <label for="{{ name }}">{{ label }}</label>
+  {{ caller() }}
+  {% if help %}<span class="help">{{ help }}</span>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro text_input(name, value='', type='text', placeholder='', extra='') -%}
+<input id="{{ name }}" name="{{ name }}" type="{{ type }}" value="{{ value }}" placeholder="{{ placeholder }}" class="text-input" {{ extra|safe }} />
+{%- endmacro %}
+
+{% macro select_input(name, options, current='', extra='') %}
+<select id="{{ name }}" name="{{ name }}" class="select-input" {{ extra|safe }}>
+  {% for opt in options %}
+    {# opt can be a string or (value, label) tuple #}
+    {% if opt is string %}
+      <option value="{{ opt }}" {% if opt|string == current|string %}selected{% endif %}>{{ opt }}</option>
+    {% else %}
+      <option value="{{ opt[0] }}" {% if opt[0]|string == current|string %}selected{% endif %}>{{ opt[1] }}</option>
+    {% endif %}
+  {% endfor %}
+</select>
+{% endmacro %}
+
+{% macro slider(name, value, min, max, step) %}
+<div class="slider-row">
+  <input id="{{ name }}" name="{{ name }}" type="range" min="{{ min }}" max="{{ max }}" step="{{ step }}" value="{{ value }}"
+         oninput="document.getElementById('{{ name }}-out').textContent = this.value" />
+  <span id="{{ name }}-out" class="value">{{ value }}</span>
+</div>
+{% endmacro %}
+
+{% macro toast(kind, title, items=None, text=None) %}
+<div class="toast toast-{{ kind }}" role="status">
+  {% if title %}<strong>{{ title }}</strong>{% endif %}
+  {% if text %}<span>{{ text }}</span>{% endif %}
+  {% if items %}<ul>{% for it in items %}<li>{{ it }}</li>{% endfor %}</ul>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro status_tile(label, value, unit='') %}
+<div class="card padded status-tile">
+  <div class="label">{{ label }}</div>
+  <div class="value">{{ value }}{% if unit %}<span class="unit">{{ unit }}</span>{% endif %}</div>
+</div>
+{% endmacro %}

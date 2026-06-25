@@ -1,0 +1,10 @@
+/* vibeFrame webfonts.
+   The design system ships self-hosted woff2 (Space Grotesk, Hanken
+   Grotesk, JetBrains Mono — variable, latin subset). To keep the
+   container slim we pull the same families from Google Fonts CDN
+   instead; the font names match, so the semantic typography tokens
+   resolve identically. If you'd rather self-host, drop the woff2
+   files into static/fonts/ and replace this @import with @font-face
+   blocks. */
+
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
