@@ -102,29 +102,40 @@ main.app-main {
   margin: 0 auto;
 }
 
-/* Home page on desktop: flex column that fills viewport height so the
-   hero row absorbs leftover space and the whole single-column stack
-   (title, hero, action bar, recent, upload) fits without scrolling. */
-@media (min-height: 600px) and (min-width: 721px) {
+/* Home page: flex column that fills viewport height so the hero row
+   absorbs leftover space and the whole single-column stack (title, hero,
+   action bar, recent, upload) fits without scrolling — at every viewport
+   size. The hero image shrinks to fit the available row; no-scroll wins
+   over max-width when those conflict. */
+main.app-main.fit-viewport {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: calc(100vh - var(--header-height));
+  max-height: calc(100vh - var(--header-height));
+  overflow: hidden;          /* hard guarantee */
+  padding: var(--space-4) var(--space-6);
+}
+main.app-main.fit-viewport > .page-title,
+main.app-main.fit-viewport > .quiet-banner,
+main.app-main.fit-viewport > .action-bar,
+main.app-main.fit-viewport > .recent-section,
+main.app-main.fit-viewport > .upload-section { flex: 0 0 auto; }
+main.app-main.fit-viewport > .hero {
+  flex: 1 1 auto;
+  min-height: 0;             /* allow flex item to shrink past content size */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* On mobile the bottom nav eats the last 64 px of the viewport, so the
+   .fit-viewport box has to leave room or its overflow:hidden chops the
+   upload zone behind it. */
+@media (max-width: 720px) {
   main.app-main.fit-viewport {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    min-height: calc(100vh - var(--header-height));
-    max-height: calc(100vh - var(--header-height));
-    padding: var(--space-4) var(--space-6);
-  }
-  main.app-main.fit-viewport > .page-title,
-  main.app-main.fit-viewport > .quiet-banner,
-  main.app-main.fit-viewport > .action-bar,
-  main.app-main.fit-viewport > .recent-section,
-  main.app-main.fit-viewport > .upload-section { flex: 0 0 auto; }
-  main.app-main.fit-viewport > .hero {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    height: calc(100vh - var(--header-height) - 64px);
+    max-height: calc(100vh - var(--header-height) - 64px);
+    padding: var(--space-3) var(--space-4);
   }
 }
 

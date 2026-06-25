@@ -53,7 +53,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-The web UI lands on `http://<pi-host>:8080`.
+The web UI lands on `http://<pi-host>` (host port 80 → container port 8080).
 
 ---
 
@@ -159,7 +159,7 @@ load harness for capturing clean numbers without waiting for real traffic.
 Every request and every background stage records into in-memory ring buffers
 (last 256 samples each, lifetime counters). View them at:
 
-- `http://<host>:8080/metrics` — sortable table, slow rows highlighted
+- `http://<host>/metrics` — sortable table, slow rows highlighted
 - `GET /metrics.json` — JSON for scripting
 - `POST /metrics/clear` — reset (useful before reproducing a slow case)
 
