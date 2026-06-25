@@ -59,6 +59,32 @@ def _pipeline_params(settings: Settings, target_w: int, target_h: int) -> dict:
     }
 
 
+def cached_png_bytes(
+    path: Path, settings: Settings, cache: Cache, sha256: str | None = None
+) -> bytes | None:
+    """Return raw cached PNG bytes if the pipeline cache already has them, else None.
+
+    Used by the /preview.png route to avoid the PIL decode+re-encode round-trip
+    on cache hits — the cached file is already a valid PNG matching exactly what
+    the panel would render.
+    """
+    target_w, target_h = _target_size(settings.orientation)
+    params = _pipeline_params(settings, target_w, target_h)
+    if sha256 is not None:
+        source_key = sha256
+    else:
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            return None
+        source_key = f"stat-{stat.st_mtime_ns}-{stat.st_size}"
+    key = CacheKey(source_sha256=source_key, params_hash=params_hash(params))
+    p = cache.get(key)
+    if p is None or not p.is_file():
+        return None
+    return p.read_bytes()
+
+
 def process(
     path: Path,
     settings: Settings,

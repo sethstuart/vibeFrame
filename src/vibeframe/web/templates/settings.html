@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% from "_macros.html" import field, select_input, slider, button, spectra_strip %}
+{% from "_macros.html" import field, select_input, slider, button %}
 {% set active = 'settings' %}
+{% set refresh_minutes = (s.refresh_seconds / 60)|round(0, 'floor')|int %}
 {% block body %}
 <section class="page-title">
   <h1>Settings</h1>
   <span class="subtitle">all values persist via <code>POST /settings</code></span>
 </section>
 
-<form method="post" action="/settings" class="settings-grid"
-      x-data="{ preview_id: {{ preview_id|tojson if preview_id is defined else 'null' }} }">
+<form id="settings-form" method="post" action="/settings" class="settings-grid">
 
   <div class="stack-lg">
     <div class="settings-section">
@@ -32,13 +32,13 @@
       {% call field('Contrast', 'contrast') %}
         {{ slider('contrast', s.contrast, 0, 3, 0.05) }}
       {% endcall %}
-      {{ spectra_strip() }}
     </div>
 
     <div class="settings-section">
       <h3>Schedule</h3>
-      {% call field('Refresh interval', 'refresh_seconds', help='Seconds between automatic refreshes.') %}
-        <input id="refresh_seconds" name="refresh_seconds" type="number" min="10" value="{{ s.refresh_seconds }}" class="text-input" />
+      {% call field('Refresh interval (minutes)', 'refresh_minutes', help='Internally stored in seconds; minimum 1 minute.') %}
+        <input id="refresh_minutes" name="refresh_minutes" type="number" min="1"
+               value="{{ refresh_minutes if refresh_minutes >= 1 else 1 }}" class="text-input" />
       {% endcall %}
       {% call field('Selection mode', 'selection_mode') %}
         {{ select_input('selection_mode', ['shuffle', 'sequential', 'favorites', 'recent'], current=s.selection_mode) }}
@@ -55,22 +55,67 @@
   <aside class="stack">
     <h3 class="eyebrow">Live preview</h3>
     <div class="card padded live-preview-card">
-      <div class="image-frame">
-        {% if preview_id %}
-          <img src="/images/{{ preview_id }}/preview.png" alt="Pipeline preview" loading="lazy" />
-        {% else %}
-          <p class="muted mono">Upload an image to see a live preview.</p>
-        {% endif %}
+      {% if preview_id %}
+      <div class="compare" id="compare" style="--pos: 50%;">
+        <img class="before" src="/images/{{ preview_id }}/thumb.png" alt="Source image" />
+        <img class="after"  id="preview-img"
+             src="/images/{{ preview_id }}/preview.png"
+             alt="Panel preview"
+             onload="document.getElementById('preview-progress').classList.remove('busy')"
+             onerror="document.getElementById('preview-progress').classList.remove('busy')" />
+        <span class="divider-line" aria-hidden="true"></span>
+        <input class="slider" type="range" min="0" max="100" value="50"
+               aria-label="Before/after compare"
+               oninput="document.getElementById('compare').style.setProperty('--pos', this.value + '%')" />
+        <div class="compare-labels">
+          <span>Source</span><span>Panel render</span>
+        </div>
       </div>
       <p class="muted" style="margin-top: var(--space-3); font-size: var(--text-xs);">
-        Reflects saved settings. Save changes to update.
+        Drag the slider to compare. Updates as you adjust dither, saturation, contrast.
       </p>
+      <progress id="preview-progress" max="100" value="0" class="preview-progress"></progress>
+      {% else %}
+      <div class="image-frame">
+        <p class="muted mono">Upload an image to see a live preview.</p>
+      </div>
+      {% endif %}
     </div>
   </aside>
 
-  <div class="settings-save-bar" style="grid-column: 1 / -1;">
+  <div class="settings-save-bar">
     {{ button('Reset', variant='ghost', type='reset') }}
     {{ button('Save', variant='primary', icon_name='check', type='submit') }}
   </div>
 </form>
+
+{% if preview_id %}
+<script>
+  // Debounced live-update: when dither/saturation/contrast/crop_mode/orientation
+  // change, repoint the preview <img> at render-with.png with the current values.
+  (function () {
+    const form = document.getElementById('settings-form');
+    const img = document.getElementById('preview-img');
+    const prog = document.getElementById('preview-progress');
+    const watch = ['dither', 'crop_mode', 'saturation', 'contrast', 'orientation'];
+    let t = null;
+    const trigger = () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const data = new FormData(form);
+        const params = new URLSearchParams();
+        watch.forEach(k => { const v = data.get(k); if (v !== null) params.set(k, v); });
+        prog.classList.add('busy');
+        img.src = `/images/{{ preview_id }}/render-with.png?${params.toString()}&cb=${Date.now()}`;
+      }, 350);
+    };
+    form.addEventListener('input', (ev) => {
+      if (watch.includes(ev.target.name)) trigger();
+    });
+    form.addEventListener('change', (ev) => {
+      if (watch.includes(ev.target.name)) trigger();
+    });
+  })();
+</script>
+{% endif %}
 {% endblock %}

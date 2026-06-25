@@ -13,9 +13,24 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 @router.get("", response_class=HTMLResponse)
 async def view_settings(request: Request, state: AppState = Depends(get_state)):
-    # Pick the most recent image to drive the live-preview pane; None if empty.
-    recent = state.library.list(limit=1)
-    preview_id = recent[0].id if recent else None
+    # Prefer the currently-displayed image — its pipeline cache is already
+    # warm so the live preview loads instantly and updates fast.
+    last_path = state.scheduler.last_path
+    preview_id: int | None = None
+    if last_path:
+        from pathlib import Path
+
+        from sqlmodel import Session, select
+
+        from vibeframe.db import Image as DbImage
+
+        with Session(state.engine) as session:
+            preview_id = session.exec(
+                select(DbImage.id).where(DbImage.path == str(Path(last_path)))
+            ).first()
+    if preview_id is None:
+        recent = state.library.list(limit=1)
+        preview_id = recent[0].id if recent else None
     return request.app.state.templates.TemplateResponse(
         request,
         "settings.html",
@@ -33,7 +48,7 @@ async def update_settings(
     request: Request,
     state: AppState = Depends(get_state),
     orientation: int = Form(...),
-    refresh_seconds: int = Form(...),
+    refresh_minutes: int = Form(...),
     selection_mode: str = Form(...),
     dither: str = Form(...),
     crop_mode: str = Form(...),
@@ -42,6 +57,7 @@ async def update_settings(
     quiet_start: str = Form(...),
     quiet_end: str = Form(...),
 ):
+    refresh_seconds = max(60, int(refresh_minutes) * 60)
     s = state.settings
     s.orientation = orientation  # type: ignore[assignment]
     s.refresh_seconds = refresh_seconds

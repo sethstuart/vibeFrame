@@ -354,7 +354,33 @@ input[type="range"] {
 .pager .meta { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--text-xs); margin-left: auto; }
 
 /* ──────────────────────────────────────── Home / hero ── */
+/* Two-column at >900px: hero | side (recent + upload). Sized to fit viewport. */
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+.home-grid .page-title { grid-column: 1 / -1; }
+.home-grid .quiet-banner { grid-column: 1 / -1; }
+@media (min-width: 900px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "title title"
+      "quiet quiet"
+      "hero  recent"
+      "actions upload";
+  }
+  .home-grid .page-title { grid-area: title; }
+  .home-grid .quiet-banner { grid-area: quiet; }
+  .home-grid .hero { grid-area: hero; }
+  .home-grid .action-bar { grid-area: actions; }
+  .home-grid .recent-section { grid-area: recent; }
+  .home-grid .upload-section { grid-area: upload; }
+}
+
 .hero {
+  position: relative;
   background: var(--surface-raised);
   border: var(--border-hair) solid var(--border-default);
   border-radius: var(--radius-sm);
@@ -365,29 +391,65 @@ input[type="range"] {
   background: var(--surface-sunken);
   border-radius: var(--radius-xs);
   overflow: hidden;
-  aspect-ratio: 480 / 800; /* portrait, matches Spectra 6 rotated */
+  aspect-ratio: 480 / 800;
+  /* Cap the frame so the whole page fits viewport on a desktop screen. */
+  max-height: min(64vh, 520px);
+  margin: 0 auto;
+  width: max-content;
+  max-width: 100%;
   display: flex; align-items: center; justify-content: center;
 }
 .hero .image-frame img {
   max-width: 100%; max-height: 100%;
+  width: auto; height: 100%;
+  object-fit: contain;
   image-rendering: pixelated;
 }
 .hero .empty { color: var(--text-muted); font-family: var(--font-mono); padding: var(--space-8); }
 .hero-caption {
-  display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-4);
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3);
   align-items: baseline; padding: var(--space-3) var(--space-1) 0;
+  font-size: var(--text-xs);
 }
-.hero-caption .path { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-secondary); }
-.hero-caption .when { color: var(--text-muted); font-size: var(--text-sm); }
-
-@media (min-width: 900px) {
-  .hero { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: var(--space-6); padding: var(--space-5); }
-  .hero .image-frame { aspect-ratio: 480 / 800; }
-}
+.hero-caption .path { font-family: var(--font-mono); color: var(--text-secondary); }
+.hero-caption .when { color: var(--text-muted); }
 
 .action-bar {
   display: flex; flex-wrap: wrap; gap: var(--space-3);
-  padding: var(--space-4) 0;
+}
+
+/* Determinate-ish circular progress overlay shown during a refresh. */
+.processing-overlay {
+  position: absolute; inset: var(--space-3);
+  background: rgba(255,255,255,0.86);
+  border-radius: var(--radius-xs);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-3);
+  z-index: 2;
+  pointer-events: none;
+}
+.processing-overlay .label {
+  font-family: var(--font-mono); font-size: var(--text-xs);
+  color: var(--text-secondary);
+  letter-spacing: var(--tracking-wide);
+}
+.spinner { width: 56px; height: 56px; transform: rotate(-90deg); }
+.spinner .track {
+  fill: none; stroke: var(--border-default); stroke-width: 4;
+}
+.spinner .indicator {
+  fill: none; stroke: var(--accent); stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 150.8;        /* ~ 2π * r (r=24) */
+  stroke-dashoffset: 150.8;
+  animation: spinner-fill 36s linear forwards;
+}
+@keyframes spinner-fill {
+  /* Approximates Inky Spectra 6 full-refresh duration; finishes ~ when
+     real swap happens (image refresh kicks new fragment + hides overlay). */
+  0%   { stroke-dashoffset: 150.8; }
+  90%  { stroke-dashoffset: 15;    }
+  100% { stroke-dashoffset: 0;     }
 }
 
 /* Drag-drop upload zone */
@@ -471,13 +533,13 @@ input[type="range"] {
 .photo-card:hover .actions, .photo-card.selected .actions { opacity: 1; }
 .photo-card .favorite-badge {
   position: absolute; top: var(--space-2); left: var(--space-2);
-  background: rgba(255,255,255,0.92);
+  background: rgba(77, 77, 77, 0.68);
   border-radius: var(--radius-pill);
   width: 24px; height: 24px;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--spectra-yellow);
+  color: var(--surface-raised);
   font-size: var(--text-sm);
-  border: var(--border-hair) solid var(--border-default);
+  border: 0;
 }
 .photo-card .meta { padding: var(--space-2) var(--space-3); }
 .photo-card .filename {
@@ -576,6 +638,87 @@ input[type="range"] {
   overflow: hidden;
 }
 .live-preview-card img { image-rendering: pixelated; max-width: 100%; max-height: 100%; }
+
+/* Before/after compare slider for the live preview. */
+.compare {
+  position: relative;
+  aspect-ratio: 480 / 800;
+  max-height: 56vh;
+  margin: 0 auto;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  --pos: 50%;
+  width: max-content; max-width: 100%;
+}
+.compare img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+.compare .before { z-index: 0; }
+.compare .after  { z-index: 1; clip-path: inset(0 calc(100% - var(--pos)) 0 0); }
+.compare .divider-line {
+  position: absolute; top: 0; bottom: 0; left: var(--pos);
+  width: 2px; background: var(--accent); z-index: 2;
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+.compare .divider-line::after {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px; height: 24px;
+  background: var(--accent); border-radius: var(--radius-pill);
+  border: var(--border-thick) solid var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+.compare .slider {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  margin: 0; padding: 0; opacity: 0; cursor: ew-resize; z-index: 3;
+}
+.compare-labels {
+  position: absolute; top: var(--space-2); left: var(--space-2); right: var(--space-2);
+  display: flex; justify-content: space-between; pointer-events: none;
+  z-index: 2;
+  font-family: var(--font-mono); font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps); text-transform: uppercase;
+  color: var(--surface-raised);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+
+/* Linear progress bar shown while live preview is rendering. */
+.preview-progress {
+  display: block;
+  width: 100%; height: 4px;
+  margin-top: var(--space-3);
+  appearance: none;
+  border: 0;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.preview-progress.busy { opacity: 1; }
+.preview-progress::-webkit-progress-bar { background: var(--surface-sunken); }
+.preview-progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: width var(--dur-normal) var(--ease-out);
+}
+.preview-progress::-moz-progress-bar { background: var(--accent); }
+/* When .busy, treat <progress value="0"> as determinate animation 0 -> 95% */
+.preview-progress.busy::-webkit-progress-value { width: 95%; }
+.preview-progress.busy {
+  --progress-fill: 95%;
+}
+.preview-progress.busy { background: linear-gradient(to right, var(--accent) 0%, var(--accent) 95%, var(--surface-sunken) 95%, var(--surface-sunken) 100%); animation: preview-fill 12s linear forwards; }
+@keyframes preview-fill {
+  0%   { background: linear-gradient(to right, var(--accent) 0%, var(--accent) 0%, var(--surface-sunken) 0%, var(--surface-sunken) 100%); }
+  100% { background: linear-gradient(to right, var(--accent) 0%, var(--accent) 95%, var(--surface-sunken) 95%, var(--surface-sunken) 100%); }
+}
 .settings-save-bar {
   position: sticky; bottom: var(--space-4); margin-top: var(--space-6);
   display: flex; justify-content: flex-end; gap: var(--space-3);
@@ -609,6 +752,11 @@ input[type="range"] {
   margin-top: var(--space-1);
 }
 .status-tile .unit { font-size: var(--text-sm); color: var(--text-muted); font-weight: var(--weight-regular); margin-left: 2px; }
+
+.metrics-toolbar {
+  display: flex; align-items: center; gap: var(--space-3);
+  margin: var(--space-3) 0 var(--space-2);
+}
 
 table.metrics {
   width: 100%; border-collapse: collapse;

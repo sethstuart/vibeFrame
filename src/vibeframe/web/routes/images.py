@@ -9,8 +9,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
 
 from vibeframe.library import IMAGE_EXTS
-from vibeframe.processor.pipeline import process
+from vibeframe.processor.pipeline import cached_png_bytes, process
 from vibeframe.thumb_warmer import generate_thumb, thumb_cache_path
+from vibeframe.timing import timed
 from vibeframe.web.deps import AppState, get_state, require_token
 
 THUMB_CACHE_HEADERS = {"Cache-Control": "public, max-age=86400"}
@@ -88,7 +89,7 @@ def _save_one_upload(file: UploadFile, target_dir: Path) -> tuple[Path | None, s
     safe_name = f"{int(time.time() * 1000)}-{name}"
     target = target_dir / safe_name
     try:
-        with target.open("wb") as out:
+        with timed("nfs.write"), target.open("wb") as out:
             shutil.copyfileobj(file.file, out)
     except OSError as e:
         return None, f"{name}: write failed ({e})"
@@ -139,6 +140,14 @@ def preview(image_id: int, state: AppState = Depends(get_state)):
     img = state.library.get(image_id)
     if not img:
         raise HTTPException(status_code=404, detail="not found")
+    # Fast path: the scheduler already filled the pipeline cache when it last
+    # rendered this image. Skip the PIL decode + re-encode and stream the
+    # cached PNG straight to the client.
+    fast = cached_png_bytes(Path(img.path), state.settings, state.cache, img.sha256)
+    if fast is not None:
+        return Response(
+            content=fast, media_type="image/png", headers=THUMB_CACHE_HEADERS
+        )
     processed = process(Path(img.path), state.settings, state.cache, img.sha256)
     buf = io.BytesIO()
     processed.image.convert("RGB").save(buf, format="PNG")
