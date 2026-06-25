@@ -73,22 +73,46 @@ async def list_images(
     )
 
 
+def _save_one_upload(file: UploadFile, target_dir: Path) -> tuple[Path | None, str | None]:
+    """Save a single upload. Returns (target_path, error_message)."""
+    name = Path(file.filename or "").name or "upload"
+    suffix = Path(name).suffix.lower()
+    if suffix not in IMAGE_EXTS:
+        return None, f"{name}: unsupported file type ({suffix or 'no extension'})"
+    safe_name = f"{int(time.time() * 1000)}-{name}"
+    target = target_dir / safe_name
+    try:
+        with target.open("wb") as out:
+            shutil.copyfileobj(file.file, out)
+    except OSError as e:
+        return None, f"{name}: write failed ({e})"
+    return target, None
+
+
 @router.post("/upload", dependencies=[Depends(require_token)])
 def upload(
-    file: UploadFile = File(...),
+    request: Request,
+    files: list[UploadFile] = File(..., description="One or more image files"),
     state: AppState = Depends(get_state),
 ):
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in IMAGE_EXTS:
-        raise HTTPException(status_code=400, detail=f"unsupported file type: {suffix}")
     target_dir = state.settings.upload_dir
     target_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = f"{int(time.time())}-{Path(file.filename or 'upload').name}"
-    target = target_dir / safe_name
-    with target.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
-    state.library.add_path(target)
-    return {"path": str(target)}
+
+    saved: list[str] = []
+    errors: list[str] = []
+    for f in files:
+        path, err = _save_one_upload(f, target_dir)
+        if path:
+            state.library.add_path(path)
+            saved.append(path.name)
+        elif err:
+            errors.append(err)
+
+    if request.headers.get("HX-Request"):
+        return request.app.state.templates.TemplateResponse(
+            request, "_upload_result.html", {"saved": saved, "errors": errors}
+        )
+    return {"saved": saved, "errors": errors}
 
 
 @router.delete("/{image_id}", dependencies=[Depends(require_token)])

@@ -1,0 +1,16 @@
+{# Toast-style fragment swapped in by HTMX after upload. Fades after 6s via CSS. #}
+{% if saved %}
+<div class="toast toast-ok">
+  <strong>Uploaded {{ saved|length }} {% if saved|length == 1 %}file{% else %}files{% endif %}</strong>
+  <ul>{% for name in saved %}<li>{{ name }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+{% if errors %}
+<div class="toast toast-err">
+  <strong>{{ errors|length }} failed</strong>
+  <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+{% if not saved and not errors %}
+<div class="toast toast-err">No files selected.</div>
+{% endif %}

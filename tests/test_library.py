@@ -89,6 +89,32 @@ def test_pipeline_accepts_precomputed_sha(tmp_path: Path):
     assert p2.source_sha256 == "deadbeef"
 
 
+def test_favorite_survives_periodic_rescan_with_missing_files(tmp_path: Path):
+    """Periodic rescan (prune=False) must not delete favorites even if the
+    files temporarily disappear (NFS hiccup)."""
+    root = tmp_path / "photos"
+    root.mkdir()
+    img_path = root / "keep.jpg"
+    _make_jpeg(img_path)
+    engine = build_engine(tmp_path / "test.db")
+    lib = ImageLibrary(root, engine, recursive=False)
+    lib.scan()
+    img = lib.list(limit=1)[0]
+    assert lib.toggle_favorite(img.id) is True
+
+    # Simulate NFS dropping every file off the share.
+    img_path.unlink()
+
+    # Periodic rescan must NOT prune.
+    lib.scan(prune=False)
+    assert lib.is_favorite(img.id), "favorite must survive periodic rescan"
+
+    # Explicit scan with prune AND empty result also leaves things alone
+    # (sanity guard for total NFS failure).
+    lib.scan(prune=True)
+    assert lib.is_favorite(img.id), "favorite must survive empty-result prune guard"
+
+
 def test_toggle_favorite_round_trip(tmp_path: Path):
     root = tmp_path / "photos"
     root.mkdir()

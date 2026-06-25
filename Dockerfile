@@ -51,7 +51,10 @@ USER vibeframe
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+# Generous timeout — image refreshes can briefly starve asyncio and cause
+# legitimate healthz responses to take many seconds. Restarting the container
+# mid-refresh would be much worse than a slow healthz reply.
+HEALTHCHECK --interval=60s --timeout=30s --start-period=60s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${VIBEFRAME_WEB_PORT:-8080}/healthz" || exit 1
 
 ENTRYPOINT ["python", "-m", "vibeframe"]

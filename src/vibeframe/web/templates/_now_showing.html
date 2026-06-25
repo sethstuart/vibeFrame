@@ -1,0 +1,14 @@
+{% if last_id %}
+  <img src="/images/{{ last_id }}/thumb.png?v={{ last_shown_ts }}"
+       alt="current image" class="display-preview" loading="lazy" />
+  <p class="path">{{ last_path }}</p>
+  <p class="when">Shown at: {{ last_shown_at }}</p>
+  <p><a href="/images/{{ last_id }}/preview.png" target="_blank">View full panel render</a></p>
+{% else %}
+  <p>No image displayed yet.</p>
+{% endif %}
+{% if in_quiet %}
+  <p class="quiet">Currently in quiet hours ({{ s.quiet_start }} – {{ s.quiet_end }} {{ s.tz }}).</p>
+{% else %}
+  <p>Next refresh in up to {{ s.refresh_seconds }} seconds.</p>
+{% endif %}

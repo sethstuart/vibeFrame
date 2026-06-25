@@ -14,26 +14,49 @@ from vibeframe.web.deps import AppState, get_state, require_token
 router = APIRouter(tags=["system"])
 
 
-@router.get("/", response_class=HTMLResponse)
-async def home(request: Request, state: AppState = Depends(get_state)):
+def _now_showing_context(state: AppState) -> dict:
     last_path = state.scheduler.last_path
     last_id = None
     if last_path:
-        for img in state.library.list(limit=200):
-            if img.path == last_path:
-                last_id = img.id
-                break
+        # Resolve the current path to its image id via a single direct DB
+        # lookup rather than scanning the recent list.
+        from pathlib import Path
+
+        from vibeframe.db import Image as DbImage
+        from sqlmodel import Session, select
+
+        with Session(state.engine) as session:
+            row = session.exec(
+                select(DbImage.id).where(DbImage.path == str(Path(last_path)))
+            ).first()
+            if row is not None:
+                last_id = row
     now_local = datetime.now(tz=state.settings.zoneinfo)
+    last_shown_at = state.scheduler.last_shown_at
+    return {
+        "last_path": last_path,
+        "last_id": last_id,
+        "last_shown_at": last_shown_at,
+        # Used as a cache-busting query string on the thumb so the browser
+        # actually re-fetches when the image changes.
+        "last_shown_ts": int(last_shown_at.timestamp()) if last_shown_at else 0,
+        "in_quiet": is_quiet(now_local, state.settings.quiet_start, state.settings.quiet_end),
+        "s": state.settings,
+    }
+
+
+@router.get("/", response_class=HTMLResponse)
+async def home(request: Request, state: AppState = Depends(get_state)):
     return request.app.state.templates.TemplateResponse(
-        request,
-        "home.html",
-        {
-            "last_path": last_path,
-            "last_id": last_id,
-            "last_shown_at": state.scheduler.last_shown_at,
-            "in_quiet": is_quiet(now_local, state.settings.quiet_start, state.settings.quiet_end),
-            "s": state.settings,
-        },
+        request, "home.html", _now_showing_context(state)
+    )
+
+
+@router.get("/system/now-showing", response_class=HTMLResponse)
+async def now_showing_fragment(request: Request, state: AppState = Depends(get_state)):
+    """HTMX-polled fragment rendering only the current-image block."""
+    return request.app.state.templates.TemplateResponse(
+        request, "_now_showing.html", _now_showing_context(state)
     )
 
 

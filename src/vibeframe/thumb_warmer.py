@@ -105,7 +105,6 @@ class ThumbWarmer:
             generated += 1
         elapsed = time.monotonic() - started
         record("thumb.warm_pass.seconds", elapsed)
-        record("thumb.warm_pass.generated", float(generated))
         if generated or skipped:
             log.info(
                 "thumb warm pass: generated=%d, cached=%d, elapsed=%.1fs",

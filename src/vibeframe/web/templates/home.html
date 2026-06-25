@@ -2,29 +2,28 @@
 {% block body %}
 <section class="now-showing">
   <h2>Now showing</h2>
-  {% if last_id %}
-    <img src="/images/{{ last_id }}/thumb.png" alt="current image" class="display-preview" loading="lazy" />
-    <p class="path">{{ last_path }}</p>
-    <p class="when">Shown at: {{ last_shown_at }}</p>
-    <p><a href="/images/{{ last_id }}/preview.png" target="_blank">View full panel render</a></p>
-  {% else %}
-    <p>No image displayed yet.</p>
-  {% endif %}
-  <form hx-post="/system/next" hx-swap="none">
+  <div id="now-showing-fragment"
+       hx-get="/system/now-showing"
+       hx-trigger="load delay:30s, every 30s"
+       hx-swap="innerHTML">
+    {% include "_now_showing.html" %}
+  </div>
+  <form hx-post="/system/next" hx-swap="none"
+        hx-on::after-request="htmx.trigger('#now-showing-fragment', 'load')">
     <button type="submit">Show next now</button>
   </form>
-  {% if in_quiet %}
-    <p class="quiet">Currently in quiet hours ({{ s.quiet_start }} – {{ s.quiet_end }} {{ s.tz }}).</p>
-  {% else %}
-    <p>Next refresh in up to {{ s.refresh_seconds }} seconds.</p>
-  {% endif %}
 </section>
 
 <section class="upload">
   <h2>Upload</h2>
-  <form action="/images/upload" method="post" enctype="multipart/form-data">
-    <input type="file" name="file" accept="image/*" required />
+  <form hx-post="/images/upload"
+        hx-encoding="multipart/form-data"
+        hx-target="#upload-result"
+        hx-swap="innerHTML"
+        hx-on::after-request="if(event.detail.successful) this.reset()">
+    <input type="file" name="files" accept="image/*" multiple required />
     <button type="submit">Upload to NFS</button>
   </form>
+  <div id="upload-result" aria-live="polite"></div>
 </section>
 {% endblock %}

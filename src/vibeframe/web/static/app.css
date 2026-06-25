@@ -80,6 +80,21 @@ table.metrics tr.slow td { background: #fff4e5; }
 .muted { color: var(--muted); }
 button.secondary { padding: .25rem .5rem; background: #fff; color: var(--fg); border: 1px solid var(--border); border-radius: 3px; font-size: .85rem; cursor: pointer; }
 
+.toast {
+  margin-top: .75rem; padding: .6rem .85rem; border-radius: 4px;
+  border: 1px solid var(--border); animation: toast-fade 8s ease forwards;
+}
+.toast strong { display: block; }
+.toast ul { margin: .25rem 0 0 1rem; padding: 0; }
+.toast-ok { background: #e8f6ec; border-color: #6ab07a; color: #1d5a2c; }
+.toast-err { background: #fdecea; border-color: #d97766; color: #7a1f12; }
+@keyframes toast-fade {
+  0% { opacity: 0; transform: translateY(-4px); }
+  5% { opacity: 1; transform: translateY(0); }
+  85% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 form label { display: block; margin-bottom: 1rem; }
 form input, form select { display: block; margin-top: .25rem; padding: .35rem; min-width: 200px; }
 form button { padding: .5rem 1rem; background: var(--accent); color: #fff; border: 0; border-radius: 3px; cursor: pointer; }

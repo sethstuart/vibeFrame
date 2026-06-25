@@ -90,7 +90,11 @@ class LibraryWatcher:
     def _rescan_loop(self) -> None:
         while not self._stop.is_set():
             try:
-                self.library.scan()
+                # Additive-only: periodic rescans must not prune. The on-disk
+                # state is the source of truth for additions, but a transient
+                # NFS hiccup that hides every file shouldn't wipe favourites
+                # and history. Real deletions come from watchdog events.
+                self.library.scan(prune=False)
                 if self.on_change:
                     try:
                         self.on_change()

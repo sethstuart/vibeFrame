@@ -18,7 +18,7 @@ from vibeframe.db import (
     image_count,
     upsert_images,
 )
-from vibeframe.timing import record, timed
+from vibeframe.timing import timed
 
 log = logging.getLogger(__name__)
 
@@ -44,11 +44,17 @@ class ImageLibrary:
         self.cache = cache
         self._lock = threading.RLock()
 
-    def scan(self) -> int:
+    def scan(self, prune: bool = True) -> int:
         """Walk the root and upsert all images. Returns the count seen.
 
         Skips re-hashing files whose (mtime, size) matches the DB — sha256
         over NFS is the dominant cost in a periodic rescan.
+
+        When `prune` is True (default), images that are in the DB but no longer
+        on disk are deleted along with their favorites and history. Periodic
+        rescans pass prune=False so a transient NFS hiccup can't wipe user
+        state. A sanity check also skips prune if the scan found zero images
+        but the DB has entries.
         """
         with self._lock, timed("library.scan"):
             with timed("library.scan.walk"):
@@ -79,14 +85,25 @@ class ImageLibrary:
                     })
             with timed("library.scan.db_upsert"):
                 upsert_images(self.engine, rows)
-            with timed("library.scan.prune"):
-                self._prune_missing({str(p) for p in paths})
-            record("library.scan.rehashed_count", float(rehashed))
+            pruned = False
+            if prune:
+                if not rows and existing:
+                    log.warning(
+                        "library scan found 0 images under %s but DB has %d — "
+                        "skipping prune to protect favorites/history (NFS hiccup?)",
+                        self.root,
+                        len(existing),
+                    )
+                else:
+                    with timed("library.scan.prune"):
+                        self._prune_missing({str(p) for p in paths})
+                    pruned = True
             log.info(
-                "library scan complete: %d images under %s (rehashed %d)",
+                "library scan complete: %d images under %s (rehashed %d, pruned=%s)",
                 len(rows),
                 self.root,
                 rehashed,
+                pruned,
             )
             return len(rows)
 
