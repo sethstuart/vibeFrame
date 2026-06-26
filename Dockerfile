@@ -28,12 +28,20 @@ ENV NUMBA_CACHE_DIR=/var/cache/vibeframe/numba
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
-COPY src ./src
-
 ARG INSTALL_RPI=1
 ARG INSTALL_PROFILE=0
 ARG INSTALL_DITHER=1
+
+# ── Dependency layer ─────────────────────────────────────────────────────
+# Keyed ONLY on pyproject.toml so it stays cached across routine code,
+# template, and CSS edits. We install the third-party dependencies (numba,
+# opencv, llvmlite, fastapi, the rpi native bits, …) using a throwaway stub
+# package — the project wheel needs *a* source tree to build, but not the
+# real one. Because this layer's only input is pyproject.toml, editing app
+# code does NOT re-run this multi-hundred-MB install or re-export its layer,
+# which is what was pinning the SD card at 60% iowait and dragging every
+# build out to ~500s.
+COPY pyproject.toml README.md ./
 RUN set -eu; \
     pip install --upgrade pip; \
     EXTRAS=""; \
@@ -42,7 +50,10 @@ RUN set -eu; \
     if [ "$INSTALL_DITHER" = "1" ]; then add_extra dither; fi; \
     if [ "$INSTALL_PROFILE" = "1" ]; then add_extra profile; fi; \
     if [ -n "$EXTRAS" ]; then SPEC=".[$EXTRAS]"; else SPEC="."; fi; \
-    echo "Installing $SPEC"; \
+    echo "Installing dependencies for $SPEC"; \
+    mkdir -p src/vibeframe/processor; \
+    : > src/vibeframe/__init__.py; \
+    : > src/vibeframe/processor/face_yunet.onnx; \
     if [ "$INSTALL_RPI" = "1" ]; then \
         apt-get update; \
         apt-get install -y --no-install-recommends build-essential python3-dev; \
@@ -51,7 +62,15 @@ RUN set -eu; \
         rm -rf /var/lib/apt/lists/*; \
     else \
         pip install "$SPEC"; \
-    fi
+    fi; \
+    rm -rf src
+
+# ── Application layer ────────────────────────────────────────────────────
+# Rebuilt on any source change, but cheap: --no-deps skips the whole
+# dependency graph (already installed above) and --force-reinstall replaces
+# the stub package with the real one. No native compiles, tiny layer.
+COPY src ./src
+RUN pip install --no-deps --force-reinstall .
 
 USER vibeframe
 
