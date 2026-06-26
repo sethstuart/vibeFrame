@@ -16,10 +16,11 @@
 {% endif %}
 
 <section class="hero" x-data="renderProgress()">
-  <div id="now-showing-fragment"
-       hx-get="/system/now-showing"
-       hx-trigger="every 30s"
-       hx-swap="innerHTML">
+  <!-- The fragment is server-rendered once on page load. It is only
+       refreshed (via htmx.ajax in JS) when a genuinely new image finishes
+       showing — never on a blind timer, which previously caused the image
+       to flash/reload and to be clobbered by stale state mid-push. -->
+  <div id="now-showing-fragment">
     {% include "_now_showing.html" %}
   </div>
   <div class="processing-overlay" x-show="active" x-cloak aria-live="polite">
@@ -96,6 +97,9 @@
   };
   // Total path length of the indicator circle (r=24): 2 * pi * r
   const SPINNER_CIRC = 2 * Math.PI * 24;
+  const POLL_IDLE_MS = 4000;   // quiet cadence when nothing is rendering
+  const POLL_FAST_MS = 750;    // responsive cadence during an active refresh
+
   function renderProgress() {
     return {
       active: false,
@@ -103,76 +107,89 @@
       stageLabel: '',
       get dashoffset() { return SPINNER_CIRC * (1 - this.pct / 100); },
       _timer: null,
+      _primed: false,            // have we captured the initial baseline yet
       _renderedSwapped: false,
-      // Baseline of the tracker as it stood when this page loaded. Any
-      // refresh "active" or "shown_at" newer than this is treated as
-      // in-session work; matching it means it's historical state we
-      // should ignore (no spinner, no image swap).
-      _baselineShownAt: null,
-      _baselineStartedAt: null,
+      _lastStartedAt: null,      // identity of the refresh we're tracking
+      _lastShownAt: null,        // identity of the last fully-shown image
       init() {
-        this.$el.addEventListener('refresh-start', () => this.begin());
-        // Capture baseline once on load. No UI state changes from this call.
-        this.captureBaseline();
+        // Button clicks ("Show next now" / test pattern) put us in the
+        // active state immediately so the spinner shows without waiting for
+        // the next poll tick.
+        this.$el.addEventListener('refresh-start', () => {
+          this.active = true;
+          this.pct = 1;
+          this.stageLabel = STAGE_LABELS.pick;
+          this._renderedSwapped = false;
+          this._schedule(POLL_FAST_MS);
+        });
+        this._schedule(0);       // first poll immediately
       },
-      async captureBaseline() {
+      _schedule(ms) {
+        clearTimeout(this._timer);
+        this._timer = setTimeout(() => this.poll(), ms);
+      },
+      async poll() {
+        let ref = {};
         try {
           const r = await fetch('/system/render-status', { cache: 'no-store' });
-          const j = await r.json();
-          const ref = j.refresh || {};
-          this._baselineShownAt = ref.shown_at || null;
-          this._baselineStartedAt = ref.started_at || null;
-          // If a refresh is genuinely in flight RIGHT NOW (active), drop
-          // straight into polling so the user gets the live spinner.
-          if (ref.active) this.begin(/*skipReset=*/true);
-        } catch {}
-      },
-      begin(skipReset) {
-        this.active = true;
-        this.pct = skipReset ? this.pct : 1;
-        this.stageLabel = STAGE_LABELS.pick;
-        this._renderedSwapped = false;
-        this.startPolling();
-      },
-      startPolling() {
-        clearInterval(this._timer);
-        this._timer = setInterval(() => this.pollOnce(), 500);
-      },
-      stopPolling() {
-        clearInterval(this._timer);
-        this._timer = null;
-      },
-      async pollOnce() {
-        try {
-          const r = await fetch('/system/render-status', { cache: 'no-store' });
-          const j = await r.json();
-          const ref = j.refresh || {};
-          // Ignore historical state: only react to a new refresh started
-          // since we loaded the page (or one currently active).
-          const isInSession =
-            ref.active
-            || (ref.started_at && ref.started_at !== this._baselineStartedAt);
-          if (!isInSession) {
-            // Tracker is reporting stale (pre-load) state. Hide spinner.
-            this.active = false;
-            this.stopPolling();
-            return;
+          ref = (await r.json()).refresh || {};
+        } catch (e) {
+          this._schedule(POLL_IDLE_MS);   // transient error — keep trying
+          return;
+        }
+
+        // First poll just captures identities; it must not be mistaken for a
+        // freshly-completed render (which would trigger a needless reload).
+        if (!this._primed) {
+          this._primed = true;
+          this._lastStartedAt = ref.started_at || null;
+          this._lastShownAt = ref.shown_at || null;
+          if (ref.active) {
+            this.active = true;
+            this._renderedSwapped = false;
           }
-          this.active = !ref.done || !this._renderedSwapped;
+        }
+
+        // A new refresh has begun since we last looked.
+        if (ref.started_at && ref.started_at !== this._lastStartedAt) {
+          this._lastStartedAt = ref.started_at;
+          this._renderedSwapped = false;
+          this.active = true;
+        }
+
+        if (this.active) {
           if (ref.progress_pct != null) this.pct = ref.progress_pct;
           if (ref.stage) this.stageLabel = STAGE_LABELS[ref.stage] || ref.stage;
+          // Early swap: show the rendered image the moment the cache is
+          // written, without waiting for the ~38s panel push.
           if (ref.rendered && ref.image_id && !this._renderedSwapped) {
             this.swapImage(ref.image_id, ref.image_path, ref.rendered_at);
             this._renderedSwapped = true;
           }
-          if (ref.done) {
-            this._baselineShownAt = ref.shown_at || this._baselineShownAt;
-            this._baselineStartedAt = ref.started_at || this._baselineStartedAt;
-            this.active = false;
-            this.stopPolling();
-            if (window.htmx) window.htmx.trigger('#now-showing-fragment', 'load');
-          }
-        } catch (e) { /* transient — keep polling */ }
+        }
+
+        // A new image has fully finished showing (panel push complete).
+        if (ref.shown_at && ref.shown_at !== this._lastShownAt) {
+          this._lastShownAt = ref.shown_at;
+          this.active = false;
+          this._reloadFragment();   // pull clean server-rendered state once
+        } else if (!ref.active && this._renderedSwapped && ref.done) {
+          // Active render finished (e.g. test pattern, which has no DB image
+          // / shown_at change) — drop the spinner.
+          this.active = false;
+        } else if (!ref.active && !this.active) {
+          // genuinely idle
+        }
+
+        this._schedule(this.active ? POLL_FAST_MS : POLL_IDLE_MS);
+      },
+      _reloadFragment() {
+        if (window.htmx) {
+          window.htmx.ajax('GET', '/system/now-showing', {
+            target: '#now-showing-fragment',
+            swap: 'innerHTML',
+          });
+        }
       },
       swapImage(imageId, imagePath, ts) {
         const frag = document.getElementById('now-showing-fragment');

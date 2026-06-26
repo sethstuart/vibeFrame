@@ -41,6 +41,15 @@ def _system_status(state: AppState) -> dict:
 
 def _now_showing_context(state: AppState) -> dict:
     last_path = state.scheduler.last_path
+    # Fall back to the image currently being rendered/pushed. The scheduler
+    # only records last_path AFTER the ~38s panel write completes, so right
+    # after a restart (or during any refresh) last_path is None even though
+    # there's a perfectly good image being shown. Without this the fragment
+    # would render "No image displayed yet" and clobber the live hero.
+    if not last_path:
+        snap = state.scheduler.refresh_tracker.snapshot()
+        if snap.get("image_path"):
+            last_path = snap["image_path"]
     last_id = None
     if last_path:
         # Resolve the current path to its image id via a single direct DB

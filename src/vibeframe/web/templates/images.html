@@ -44,10 +44,15 @@
         {% endif %}
         <span class="select-toggle" @click.stop="toggle({{ img.id }})"></span>
         <!-- Click anywhere on the thumb opens the lightbox unless we're
-             in multi-select mode (then the click toggles selection). -->
+             in multi-select mode (then the click toggles selection).
+             The filename is carried on data-name (Jinja autoescapes it)
+             rather than interpolated into the JS expression — embedding a
+             |tojson string inside this double-quoted attribute would break
+             the attribute. -->
         <img src="/images/{{ img.id }}/thumb.png" alt="{{ img.path }}" loading="lazy"
+             data-name="{{ img.path.split('/')[-1] }}"
              style="cursor: pointer;"
-             @click="mode ? toggle({{ img.id }}) : openLightbox({{ img.id }}, {{ img.path|tojson }})" />
+             @click="mode ? toggle({{ img.id }}) : openLightbox({{ img.id }}, $el.dataset.name)" />
         <div class="actions" @click.stop>
           {% if img.id in favorite_ids %}
             {{ icon_button('star-filled', 'Unfavorite', extra='hx-delete="/favorites/' ~ img.id ~ '" hx-swap="none"') }}

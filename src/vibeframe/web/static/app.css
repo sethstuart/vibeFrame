@@ -546,11 +546,18 @@ main.app-main.fit-viewport .hero .hero-caption { flex: 0 0 auto; }
 .recent-strip {
   display: flex; gap: var(--space-3);
   overflow-x: auto;
+  overflow-y: hidden;
   scroll-snap-type: x proximity;
-  padding-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  /* The whole strip is the scroll surface. touch-action: pan-x tells the
+     browser a horizontal drag anywhere on the strip pans it (so you don't
+     have to find a thin scrollbar), and we hide the scrollbar entirely. */
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* old Edge */
 }
-.recent-strip::-webkit-scrollbar { height: 6px; }
-.recent-strip::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: var(--radius-pill); }
+.recent-strip::-webkit-scrollbar { display: none; }  /* WebKit/Blink */
 .recent-strip .recent-card {
   flex: 0 0 auto;
   width: 96px; height: 128px;
@@ -560,6 +567,8 @@ main.app-main.fit-viewport .hero .hero-caption { flex: 0 0 auto; }
   background: var(--surface-sunken);
   scroll-snap-align: start;
   cursor: pointer;
+  /* Don't let the card swallow the horizontal drag as a link gesture. */
+  touch-action: pan-x;
   transition: border-color var(--dur-fast) var(--ease-out);
 }
 .recent-strip .recent-card:hover { border-color: var(--accent); }
