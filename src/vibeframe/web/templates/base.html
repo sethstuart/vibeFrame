@@ -9,8 +9,12 @@
   <link rel="icon" href="/static/logo-mark.svg" />
   <link rel="stylesheet" href="/static/app.css" />
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
-  <script src="https://unpkg.com/alpinejs@3.14.1" defer></script>
+  <!-- app.js MUST come before Alpine: it registers Alpine.data components
+       via an alpine:init listener, and Alpine's CDN build dispatches
+       alpine:init the moment its own script runs. Loading app.js first
+       guarantees the listener is in place. -->
   <script src="/static/app.js" defer></script>
+  <script src="https://unpkg.com/alpinejs@3.14.1" defer></script>
 </head>
 <body>
   <header class="app-header">

@@ -1,38 +1,19 @@
-/* vibeFrame UI glue — tiny helpers driven by Alpine.js where useful.
-   Most interactivity comes from HTMX; this file only handles:
-     - multi-select state on the library page
-     - lightbox open/close
-     - drag-and-drop upload zone
-*/
+/* vibeFrame UI glue — Alpine components registered here.
 
-document.addEventListener('alpine:init', () => {
-  /* Multi-select store for the library. Photo cards toggle into a Set. */
-  Alpine.data('selection', () => ({
-    mode: false,
-    ids: new Set(),
-    toggleMode() { this.mode = !this.mode; if (!this.mode) this.ids.clear(); },
-    toggle(id) {
-      if (this.ids.has(id)) this.ids.delete(id); else this.ids.add(id);
-      // trigger reactivity by reassigning
-      this.ids = new Set(this.ids);
-    },
-    has(id) { return this.ids.has(id); },
-    get count() { return this.ids.size; },
-    list() { return Array.from(this.ids); },
-    clear() { this.ids = new Set(); },
-  }));
+   IMPORTANT: this file MUST be loaded BEFORE the Alpine CDN script. The
+   CDN build calls Alpine.start() — which dispatches `alpine:init`
+   synchronously — the instant it executes. If we registered our
+   components only inside an `alpine:init` listener added after Alpine
+   loaded, that listener would never fire and `x-data="dropzone"` would
+   throw "dropzone is not defined". So we register defensively: if Alpine
+   is already on the page we register immediately, otherwise we queue on
+   `alpine:init` (which works because this script runs first). */
 
-  /* Lightbox — open/close + which image. */
-  Alpine.data('lightbox', () => ({
-    open: false, current: null,
-    show(id, path, shownAt) { this.current = { id, path, shownAt }; this.open = true; },
-    close() { this.open = false; this.current = null; },
-  }));
-
-  /* Drag-drop upload zone. Bypasses the form on drop because programmatic
-     assignment to <input type="file">.files is browser-quirky on hidden
-     inputs — POST a manually-built FormData instead. The browse-button
-     path still uses the form's HTMX submit. */
+function vfRegisterAlpine(Alpine) {
+  /* Drag-drop upload zone. On drop we bypass the form and POST a
+     manually-built FormData — programmatic assignment to a hidden
+     <input type="file">.files is unreliable across browsers. The
+     browse-button path still uses the form's HTMX submit. */
   Alpine.data('dropzone', () => ({
     dragOver: false,
     _depth: 0,            // dragenter/leave counter so child elements don't flicker
@@ -40,11 +21,7 @@ document.addEventListener('alpine:init', () => {
       if (!files || !files.length) return;
       const host = document.getElementById('toast-host');
       const fd = new FormData();
-      for (const f of files) {
-        // Only forward actual files (a dragged file has a non-empty type or
-        // a filename); skip dragged text/links which arrive as 0 files anyway.
-        fd.append('files', f);
-      }
+      for (const f of files) fd.append('files', f);
       try {
         const r = await fetch('/images/upload', {
           method: 'POST',
@@ -62,8 +39,8 @@ document.addEventListener('alpine:init', () => {
     },
     init() {
       // Global guard: stop the browser from navigating to / opening a file
-      // that's dropped anywhere on the page (the #1 reason drag-drop "does
-      // nothing" — the page just gets replaced by the raw image). Bind once.
+      // dropped anywhere on the page (the classic "drag-drop does nothing —
+      // the page just turns into the raw image"). Bind once.
       if (!window.__vfDropGuard) {
         window.__vfDropGuard = true;
         window.addEventListener('dragover', (ev) => ev.preventDefault());
@@ -95,4 +72,13 @@ document.addEventListener('alpine:init', () => {
       });
     },
   }));
-});
+}
+
+if (window.Alpine) {
+  // Alpine already present (script loaded out of order) — register now.
+  vfRegisterAlpine(window.Alpine);
+} else {
+  // Normal path: this script ran before Alpine, so the listener is in
+  // place when Alpine dispatches alpine:init during start().
+  document.addEventListener('alpine:init', () => vfRegisterAlpine(window.Alpine));
+}
