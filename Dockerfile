@@ -38,10 +38,11 @@ ARG INSTALL_DITHER=1
 # opencv, llvmlite, fastapi, the rpi native bits, …) using a throwaway stub
 # package — the project wheel needs *a* source tree to build, but not the
 # real one. Because this layer's only input is pyproject.toml, editing app
-# code does NOT re-run this multi-hundred-MB install or re-export its layer,
-# which is what was pinning the SD card at 60% iowait and dragging every
-# build out to ~500s.
-COPY pyproject.toml README.md ./
+# code OR the README does NOT re-run this multi-hundred-MB install or
+# re-export its layer, which is what was pinning the SD card at 60% iowait and
+# dragging every build out to ~500s. (README.md used to share this COPY, so a
+# one-line doc edit busted the cache and forced the whole ~40s reinstall.)
+COPY pyproject.toml ./
 RUN set -eu; \
     pip install --upgrade pip; \
     EXTRAS=""; \
@@ -54,6 +55,7 @@ RUN set -eu; \
     mkdir -p src/vibeframe/processor; \
     : > src/vibeframe/__init__.py; \
     : > src/vibeframe/processor/face_yunet.onnx; \
+    : > README.md; \
     if [ "$INSTALL_RPI" = "1" ]; then \
         apt-get update; \
         apt-get install -y --no-install-recommends build-essential python3-dev; \
@@ -69,7 +71,12 @@ RUN set -eu; \
 # Rebuilt on any source change, but cheap: --no-deps skips the whole
 # dependency graph (already installed above) and --force-reinstall replaces
 # the stub package with the real one. No native compiles, tiny layer.
+# The dependency layer left an empty README.md placeholder (hatchling needs
+# the readme target to exist); copy the real one here so the wheel metadata
+# is correct. A README edit only re-runs this seconds-long layer, never the
+# dependency install above.
 COPY src ./src
+COPY README.md ./
 RUN pip install --no-deps --force-reinstall .
 
 USER vibeframe
