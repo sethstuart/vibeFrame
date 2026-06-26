@@ -197,6 +197,7 @@ Images:
 | `POST /images/{id}/show` | Push this specific image to the panel now. |
 | `POST /images/bulk/favorite` / `POST /images/bulk/delete` | Bulk ops (`{ids:[…]}`). |
 | `GET /images/{id}/thumb.png` | Cached 320px JPEG thumbnail. |
+| `GET /images/{id}/full.jpg` | Full-aspect (uncropped) downscaled JPEG — the library lightbox view. |
 | `GET /images/{id}/source-cropped.jpg` | Full-quality source cropped to the panel composition (the hero image). |
 | `GET /images/{id}/preview.png` | Dithered render of exactly what the panel shows. |
 | `GET /images/{id}/render-with.png` | Preview render with ad-hoc `dither`/`crop_mode`/`saturation`/`contrast`/`orientation` query params (drives the Settings live preview). |

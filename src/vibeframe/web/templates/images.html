@@ -39,9 +39,8 @@
     {% for img in images %}
     <article class="photo-card" :class="has({{ img.id }}) ? 'selected' : ''">
       <div class="thumb-wrap">
-        {% if img.id in favorite_ids %}
-        <span class="favorite-badge" aria-hidden="true">★</span>
-        {% endif %}
+        <span class="favorite-badge" aria-hidden="true"
+              x-show="isFav({{ img.id }})" x-cloak>★</span>
         <span class="select-toggle" @click.stop="toggle({{ img.id }})"></span>
         <!-- Click anywhere on the thumb opens the lightbox unless we're
              in multi-select mode (then the click toggles selection).
@@ -54,11 +53,16 @@
              style="cursor: pointer;"
              @click="mode ? toggle({{ img.id }}) : openLightbox({{ img.id }}, $el.dataset.name)" />
         <div class="actions" @click.stop>
-          {% if img.id in favorite_ids %}
-            {{ icon_button('star-filled', 'Unfavorite', extra='hx-delete="/favorites/' ~ img.id ~ '" hx-swap="none"') }}
-          {% else %}
-            {{ icon_button('star', 'Favorite', extra='hx-post="/favorites/' ~ img.id ~ '" hx-swap="none"') }}
-          {% endif %}
+          <button type="button" class="icon-btn"
+                  :class="isFav({{ img.id }}) ? 'is-active' : ''"
+                  :aria-label="isFav({{ img.id }}) ? 'Unfavorite' : 'Favorite'"
+                  :title="isFav({{ img.id }}) ? 'Unfavorite' : 'Favorite'"
+                  @click="toggleFav({{ img.id }})">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <use :href="isFav({{ img.id }}) ? '/static/icons.svg#star-filled' : '/static/icons.svg#star'"/>
+            </svg>
+          </button>
           {{ icon_button('skip-forward', 'Show now', extra='hx-post="/images/' ~ img.id ~ '/show" hx-swap="none"') }}
           {{ icon_button('trash', 'Delete', variant='danger', extra='hx-delete="/images/' ~ img.id ~ '" hx-confirm="Delete ' ~ img.path ~ ' from NFS?" hx-swap="none"') }}
         </div>
@@ -78,7 +82,7 @@
        @keydown.escape.window="closeLightbox()">
     <button type="button" class="lightbox-close" aria-label="Close" @click="closeLightbox()">×</button>
     <figure class="lightbox-figure" @click="closeLightbox()">
-      <img :src="lbId ? `/images/${lbId}/source-cropped.jpg` : ''" alt="" />
+      <img :src="lbId ? `/images/${lbId}/full.jpg` : ''" alt="" />
       <figcaption x-text="lbPath ? lbPath.split('/').pop() : ''"></figcaption>
     </figure>
   </div>
@@ -121,6 +125,10 @@
     return {
       mode: false,
       ids: new Set(),
+      // Favorite state, seeded from the server so the star badge/button
+      // reflect reality on load and update instantly on click (the POST/
+      // DELETE persists in the background).
+      favs: new Set({{ favorite_ids|list|tojson }}),
       lbOpen: false,
       lbId: null,
       lbPath: null,
@@ -133,6 +141,18 @@
       get count() { return this.ids.size; },
       list() { return Array.from(this.ids); },
       clear() { this.ids = new Set(); },
+      isFav(id) { return this.favs.has(id); },
+      toggleFav(id) {
+        const wasFav = this.favs.has(id);
+        if (wasFav) this.favs.delete(id); else this.favs.add(id);
+        this.favs = new Set(this.favs);   // reassign for reactivity
+        fetch(`/favorites/${id}`, { method: wasFav ? 'DELETE' : 'POST' })
+          .catch(() => {
+            // Revert the optimistic flip if the request failed.
+            if (wasFav) this.favs.add(id); else this.favs.delete(id);
+            this.favs = new Set(this.favs);
+          });
+      },
       openLightbox(id, path) { this.lbId = id; this.lbPath = path; this.lbOpen = true; },
       closeLightbox() { this.lbOpen = false; this.lbId = null; this.lbPath = null; },
     };

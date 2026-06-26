@@ -266,6 +266,27 @@ def source_cropped(image_id: int, state: AppState = Depends(get_state)):
     )
 
 
+@router.get("/{image_id}/full.jpg")
+def full_image(image_id: int, state: AppState = Depends(get_state)):
+    """Full-aspect (uncropped) EXIF-corrected JPEG of the source image,
+    downscaled to a sane max so the lightbox shows the whole photo — not the
+    panel-cropped composition that source-cropped.jpg / preview.png use."""
+    from PIL import Image as PILImage
+    from PIL import ImageOps
+
+    img = state.library.get(image_id)
+    if not img:
+        raise HTTPException(status_code=404, detail="not found")
+    with timed("full_preview"), PILImage.open(img.path) as raw:
+        oriented = ImageOps.exif_transpose(raw).convert("RGB")
+        oriented.thumbnail((1600, 1600), PILImage.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        oriented.save(buf, format="JPEG", quality=85)
+    return Response(
+        content=buf.getvalue(), media_type="image/jpeg", headers=THUMB_CACHE_HEADERS
+    )
+
+
 @router.get("/{image_id}/thumb.png")
 def thumb(image_id: int, state: AppState = Depends(get_state)):
     img = state.library.get(image_id)
