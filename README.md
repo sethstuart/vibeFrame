@@ -8,13 +8,47 @@ vibeFrame watches a directory on an NFS share, runs each image through a smart-c
 
 ## Features
 
-- Smart, saliency-aware cropping (with center/fit fallbacks) so portrait photos don't get awkwardly centered.
-- LAB-aware dithering — Floyd-Steinberg, Atkinson, Bayer, or none — for cleaner color reproduction than naive RGB quantization.
-- On-disk cache keyed by image hash + pipeline params, so re-shows are free.
-- File watcher (with periodic NFS rescan fallback) picks up new photos automatically.
+**Image pipeline**
+
+- **Face-aware smart cropping.** Detects faces (YuNet) and centres the crop on
+  them so people stay in frame. With no faces, falls back to an ensemble of
+  spectral-residual saliency × dominant-colour rejection so the crop chases the
+  subject instead of a vibrant sky. `center` and `fit` modes are available too.
+- **LAB-accurate dithering** — Floyd-Steinberg, Atkinson, Bayer, or none —
+  mapped through a perceptual LAB lookup table for cleaner color than naive RGB
+  quantization. The error-diffusion loops are **numba-JIT-accelerated** when the
+  `dither` extra is installed (~sub-second per image on a Pi 4 vs ~20–50s pure
+  Python).
+- **Two-layer on-disk cache.** A "prepared" cache holds the decoded + cropped
+  image so a settings tweak that only changes dither/saturation/contrast skips
+  the NFS read and crop; the final dithered PNG is cached keyed by image hash +
+  pipeline params, so re-shows are instant.
+
+**Operation**
+
+- File watcher (with a periodic NFS-rescan fallback, since NFS often misses
+  inotify) picks up new photos automatically and pre-warms thumbnails.
 - Quiet hours skip refreshes overnight.
-- Local web UI: current image, library, favorites, upload-to-NFS, per-image preview of what the panel will actually show, test pattern, manual "next now" trigger.
-- Hardware-mocked dev mode — run the whole stack on macOS/Windows and inspect rendered frames as PNGs.
+- Settings changed in the web UI **persist across restarts** (SQLite-backed,
+  applied over the env defaults on boot).
+- HEIC/HEIF support is available via an optional `heif` extra.
+
+**Web UI** (FastAPI + HTMX + Alpine, "e-ink editorial" design)
+
+- **Now showing** — full-quality cropped hero of the current image, a live
+  determinate progress spinner driven by the *real* render pipeline, drag-and-
+  drop or browse upload to NFS with toast feedback, and a horizontally-scrolling
+  "recently shown" strip.
+- **Library / Favorites** — paginated grid, filename search, sort, multi-select
+  with bulk favorite/delete, click-to-zoom lightbox, and per-image favorite /
+  show-now / delete actions.
+- **Settings** — live before/after compare slider that re-renders on change,
+  a "push to frame?" prompt on save, and quiet-hours / schedule / tone controls.
+- **Metrics** — live-updating per-stage timing table plus status tiles
+  (avg processing time, NFS reachability + r/w latency, image count).
+
+- Hardware-mocked dev mode — run the whole stack on macOS/Windows and inspect
+  rendered frames as PNGs.
 
 ---
 
@@ -57,17 +91,37 @@ The web UI lands on `http://<pi-host>` (host port 80 → container port 8080).
 
 #### Rebuilding on the Pi
 
-If you've pulled new code and want to rebuild in place, **stop the
-existing container first** so the build doesn't fight the live process
-for RAM:
+The Dockerfile installs dependencies in a layer keyed only on
+`pyproject.toml`, so **rebuilds after editing app code/templates/CSS reuse
+the cached dependency layer** — they take seconds and barely touch the SD
+card. Only a change to `pyproject.toml` (i.e. dependencies) triggers the
+full ~5-minute reinstall of numba/opencv/etc.
+
+For any rebuild, stop the running container first so the build and the live
+process don't compete for the SD card's limited write throughput (the real
+bottleneck on a Pi 4 — you'll see high I/O wait, not memory exhaustion):
 
 ```sh
 docker compose down && docker compose up -d --build
 ```
 
-On a 4 GB Pi the running container holds ~200-300 MB of resident
-Python + numpy + opencv state; bringing it down before rebuilding
-prevents OOM-kills during the pip install / wheel build steps.
+> If builds on the Pi are painful, the nicest option is to build the arm64
+> image on a faster machine (or CI) and `docker pull` it on the Pi so the
+> Pi never compiles anything.
+
+### Build-time options
+
+Pass these as `--build-arg` (e.g. `docker compose build --build-arg INSTALL_DITHER=0`):
+
+| Build arg | Default | Effect |
+|---|---|---|
+| `INSTALL_RPI` | `1` | Install the real Inky/SPI/GPIO driver (`inky[rpi]`, `gpiod`). Set `0` for dev images that only use the mock driver. |
+| `INSTALL_DITHER` | `1` | Install `numba` for JIT-accelerated dithering. `0` keeps a pure-NumPy fallback (correct, but ~20–50s/image on a Pi). |
+| `INSTALL_PROFILE` | `0` | Install `py-spy` for deep profiling (see [Profiling](#profiling)). |
+
+HEIC/HEIF photo support is a separate Python extra (`pip install ".[heif]"`);
+it's not enabled in the Docker image by default since it's a heavy native
+build most libraries don't need.
 
 ---
 
@@ -105,7 +159,7 @@ pytest
 
 ## Configuration reference
 
-All settings come from environment variables prefixed `VIBEFRAME_`. See `.env.example` for the canonical list. Highlights:
+Environment variables prefixed `VIBEFRAME_` set the **defaults**. See `.env.example` for the canonical list. Note: the display/tone/schedule settings (orientation, refresh interval, selection mode, dither, crop mode, saturation, contrast, quiet hours) can also be changed at runtime in the web UI's Settings page — those are persisted to SQLite and applied *over* the env defaults on the next boot, so a saved setting survives container restarts. Highlights:
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -125,19 +179,44 @@ All settings come from environment variables prefixed `VIBEFRAME_`. See `.env.ex
 
 ## Web UI endpoints
 
+Pages:
+
 | Path | Purpose |
 |---|---|
-| `GET /` | Current image, manual "next now", quiet-hours status. |
-| `GET /images` | Paginated library with thumbnails. |
-| `POST /images/upload` | Multipart upload → written to `PHOTOS_DIR/UPLOAD_SUBDIR/`. |
+| `GET /` | Now showing — current image, live progress, recent strip, upload. |
+| `GET /images` | Paginated library grid (`?q=`, `?sort=`, `?favorites_only=`, `?offset=`, `?limit=`). |
+| `GET /settings` | Settings form + live before/after preview. |
+| `GET /metrics` | Live per-stage timing table + status tiles. |
+
+Images:
+
+| Path | Purpose |
+|---|---|
+| `POST /images/upload` | Multipart (multi-file) upload → `PHOTOS_DIR/UPLOAD_SUBDIR/`. |
 | `DELETE /images/{id}` | Delete from NFS. |
-| `GET /images/{id}/preview.png` | Server-rendered preview of what the panel will show. |
+| `POST /images/{id}/show` | Push this specific image to the panel now. |
+| `POST /images/bulk/favorite` / `POST /images/bulk/delete` | Bulk ops (`{ids:[…]}`). |
+| `GET /images/{id}/thumb.png` | Cached 320px JPEG thumbnail. |
+| `GET /images/{id}/source-cropped.jpg` | Full-quality source cropped to the panel composition (the hero image). |
+| `GET /images/{id}/preview.png` | Dithered render of exactly what the panel shows. |
+| `GET /images/{id}/render-with.png` | Preview render with ad-hoc `dither`/`crop_mode`/`saturation`/`contrast`/`orientation` query params (drives the Settings live preview). |
 | `POST /favorites/{id}` / `DELETE /favorites/{id}` | Toggle favorite. |
-| `GET /settings` / `POST /settings` | Runtime-tunable settings. |
-| `POST /system/next` | Trigger an immediate refresh. |
-| `GET /system/test-pattern.png` | Render the 6-color palette as bars (preview). |
-| `POST /system/test-pattern` | Push the palette bars to the actual display. |
-| `GET /healthz` | Liveness check (used by Docker healthcheck). |
+
+System:
+
+| Path | Purpose |
+|---|---|
+| `POST /settings` | Persist settings (redirects to `/settings?saved=1`). |
+| `POST /system/next` | Trigger an immediate refresh of the next image. |
+| `GET /system/now-showing` | HTML fragment of the current-image hero (polled/swapped by the UI). |
+| `GET /system/status` / `GET /system/status-chip` | Scheduler status JSON / header chip fragment. |
+| `GET /system/render-status` | Live render progress JSON (drives the home spinner + early image swap). |
+| `GET /system/recent` | Recently-shown images JSON (drives the recent strip). |
+| `GET /system/test-pattern.png` / `POST /system/test-pattern` | Render / push the 6-color palette bars. |
+| `GET /metrics.json` / `GET /metrics/fragment` / `POST /metrics/clear` | Metrics JSON / live table fragment / reset. |
+| `GET /healthz` | Liveness check (used by the Docker healthcheck). |
+
+Write endpoints honor `VIBEFRAME_WEB_TOKEN` (via the `X-Vibeframe-Token` header) when it's set.
 
 ---
 
@@ -146,20 +225,21 @@ All settings come from environment variables prefixed `VIBEFRAME_`. See `.env.ex
 ```
             ┌─────────────────────── vibeFrame container ───────────────────────┐
             │                                                                   │
-NFS ───────▶│  ImageLibrary  ◀── watcher (watchdog) ── /photos/                  │
-bind        │       │                                                           │
+NFS ───────▶│  ImageLibrary ◀── watcher (watchdog + rescan) ── /photos/         │
+bind        │       │                └─▶ ThumbWarmer (bg thumbs + prepared cache)│
             │       ▼                                                           │
-            │  Processor (PIL + NumPy: crop → tonemap → dither) ──▶ Cache       │
-            │       │                                                           │
-            │       ▼                                                           │
-            │  Scheduler (asyncio) ──▶ DisplayDriver ──▶ Inky SPI (or Mock PNG) │
-            │       ▲                                                           │
-            │       │                                                           │
-            │  FastAPI Web UI ◀────── SQLite (settings/favorites/history)       │
+            │  Processor: face/saliency crop → tonemap → numba dither            │
+            │       │            └─ prepared cache ──┐   └─ dithered cache ──┐   │
+            │       ▼                                ▼                       ▼   │
+            │  Scheduler (asyncio) ──▶ DisplayDriver ──▶ Inky SPI (or Mock PNG)  │
+            │       │   └─ RenderTracker (live progress) ──┐                     │
+            │       ▼                                       ▼                     │
+            │  FastAPI Web UI ◀── SQLite (settings/favorites/history)            │
+            │       └─ timing ring buffers ──▶ /metrics                          │
             └───────────────────────────────────────────────────────────────────┘
 ```
 
-One Python process, one asyncio loop. The Inky SPI driver is not thread-safe, so the scheduler owns all writes; heavy work (image decode + dither) runs in a thread executor.
+One Python process, one asyncio loop. The Inky SPI driver is not thread-safe, so the scheduler owns all writes; heavy work (image decode + dither) runs in a thread executor. A `RenderTracker` exposes per-stage progress so the web UI can show a real progress spinner and swap in the new image the instant it's rendered, without waiting for the ~38s panel push to finish.
 
 ---
 
@@ -168,14 +248,17 @@ One Python process, one asyncio loop. The Inky SPI driver is not thread-safe, so
 vibeFrame has built-in lightweight timing for every hot path and a synthetic
 load harness for capturing clean numbers without waiting for real traffic.
 
-> **The pipeline floor is the dither.** Floyd-Steinberg on the Pi 4 takes
-> ~20 s per 480×800 image; Atkinson is ~50 s. Both are pure-Python error
-> diffusion loops over ~384 k pixels. The result is cached after the first
-> run, so subsequent shows of the same image are sub-second. To shave the
-> first-time cost, switch `VIBEFRAME_DITHER` to `bayer` (~10 ms) at the
-> cost of less smooth gradients. The post-EXIF + post-crop intermediate
-> is also cached, so settings tweaks that only touch
-> saturation/contrast/dither skip the source decode entirely.
+> **Where the time goes.** With the `dither` extra (numba) installed — the
+> default for the Pi image — error-diffusion dithering is JIT-compiled and
+> runs in tens of milliseconds, so the dominant cost of a refresh is the
+> physical panel write (`driver.inky.show`, ~38 s on the Spectra 6 — that's
+> hardware, not us). **Without** numba the pure-NumPy fallback is ~20 s
+> (Floyd-Steinberg) to ~50 s (Atkinson) per 480×800 image. Either way the
+> dithered output is cached after the first render, so re-shows are instant,
+> and the post-EXIF + post-crop intermediate is cached separately so a
+> settings tweak that only changes dither/saturation/contrast skips the NFS
+> read and crop. `bayer` (~10 ms, ordered) is the fastest dither if you ever
+> need to avoid the diffusion cost entirely.
 
 ### Live metrics
 
@@ -193,9 +276,9 @@ Stage names you'll see:
 | `http.GET./...`, `http.POST./...` | Per-route HTTP duration (matched route, not URL) |
 | `pipeline.process.hit` / `.miss` | End-to-end image processing, split by cache result |
 | `pipeline.image.open`, `pipeline.crop.<mode>`, `pipeline.dither.<algo>`, `pipeline.cache.write`, ... | Individual pipeline stages |
+| `pipeline.prepared.lookup` / `.load` / `.write` | The decoded+cropped intermediate cache |
 | `library.scan` and `library.scan.*` | Scan total + walk/stat/hash/db sub-stages |
-| `library.scan.rehashed_count` | How many files actually needed re-hashing (not a duration; recorded as a value) |
-| `thumb.generate`, `thumb.warm_pass.seconds` | Thumbnail work |
+| `thumb.generate`, `thumb.warm_pass.seconds`, `nfs.write`, `source_cropped` | Thumbnails, NFS upload writes, hero crop |
 | `driver.inky.prepare` / `.set_image` / `.show` | Display driver phases (Spectra 6 physical refresh is `driver.inky.show`) |
 | `scheduler.step.total`, `scheduler.pick_next` | Scheduler timings |
 
