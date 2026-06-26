@@ -48,6 +48,11 @@ def _tile_context(state: AppState, snap: dict) -> dict:
         ("quantize", _avg_ms(snap, "pipeline.palette.build_p")),
     ]
     proc_stages = [{"label": label, "ms": ms} for label, ms in stages if ms > 0]
+    # Distinguish "nothing rendered yet" from "every show hit the on-disk cache"
+    # (the cache survives restarts; the in-memory timing buffers don't, so a
+    # post-rebuild push of an already-rendered image is a hit with no miss).
+    proc_miss_count = snap.get("pipeline.process.miss", {}).get("count", 0)
+    proc_hit_count = snap.get("pipeline.process.hit", {}).get("count", 0)
 
     # NFS status — photos_dir reachable + has at least one image; read = avg
     # of pipeline.image.open; write = avg of nfs.write.
@@ -58,6 +63,8 @@ def _tile_context(state: AppState, snap: dict) -> dict:
     return {
         "proc_total_seconds": proc_total_ms / 1000.0,
         "proc_stages": proc_stages,
+        "proc_miss_count": proc_miss_count,
+        "proc_hit_count": proc_hit_count,
         "nfs_reachable": nfs_reachable,
         "nfs_read_ms": nfs_read_ms,
         "nfs_write_ms": nfs_write_ms,

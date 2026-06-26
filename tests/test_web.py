@@ -131,6 +131,46 @@ def test_test_pattern_endpoint(tmp_settings):
     asyncio.run(run())
 
 
+def test_settings_push_prompt_only_on_render_change(tmp_settings):
+    """The 'push to frame?' prompt (pushable=1) must appear only when a
+    render-affecting setting changed — not for schedule/UI-only saves like the
+    metrics refresh interval."""
+    tmp_settings.ensure_dirs()
+    app, _ = _setup(tmp_settings)
+
+    # All current (default) values; we vary one field per request.
+    base = {
+        "orientation": 270,
+        "refresh_minutes": 30,
+        "selection_mode": "shuffle",
+        "dither": "floyd-steinberg",
+        "crop_mode": "smart",
+        "saturation": 1.15,
+        "contrast": 1.05,
+        "quiet_hours_enabled": "true",
+        "quiet_start": "22:00",
+        "quiet_end": "07:00",
+        "metrics_refresh_seconds": 10,
+    }
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test", follow_redirects=False
+        ) as client:
+            # Non-render change (metrics refresh) → no push prompt.
+            r = await client.post("/settings", data={**base, "metrics_refresh_seconds": 20})
+            assert r.status_code == 303, r.text
+            assert "pushable=1" not in r.headers["location"]
+
+            # Render-affecting change (saturation) → push prompt.
+            r = await client.post("/settings", data={**base, "saturation": 2.0})
+            assert r.status_code == 303, r.text
+            assert "pushable=1" in r.headers["location"]
+
+    asyncio.run(run())
+
+
 def test_html_pages_render(tmp_settings):
     tmp_settings.ensure_dirs()
     app, _ = _setup(tmp_settings)

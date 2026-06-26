@@ -8,12 +8,17 @@
   {{ status_tile('Slow rows', rows|selectattr('p95_ms', 'gt', 1000)|list|length, unit='p95 > 1s') }}
   <div class="card padded status-tile">
     <div class="label">Avg image processing</div>
-    <div class="value">{{ '%.2f'|format(proc_total_seconds) }}<span class="unit">s</span></div>
+    <div class="value">
+      {% if proc_miss_count %}{{ '%.2f'|format(proc_total_seconds) }}<span class="unit">s</span>
+      {% else %}—{% endif %}
+    </div>
     <div class="muted" style="font-family: var(--font-mono); font-size: var(--text-xs); margin-top: 4px;">
       {% if proc_stages %}
         {% for st in proc_stages %}{{ st.label }} {{ '%.0f'|format(st.ms) }}{% if not loop.last %} · {% endif %}{% endfor %} ms
+      {% elif proc_hit_count %}
+        {{ proc_hit_count }} cache hit{{ 's' if proc_hit_count != 1 else '' }} since restart · no full render yet
       {% else %}
-        no full renders yet
+        no renders yet
       {% endif %}
     </div>
   </div>

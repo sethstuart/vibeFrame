@@ -129,7 +129,7 @@
   })();
 </script>
 
-{% if saved and preview_id %}
+{% if pushable and preview_id %}
 <div class="toast-host">
   <div class="toast toast-info push-toast" x-data="pushToast()"
        x-show="open" x-cloak x-init="schedule()">

@@ -16,6 +16,7 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 async def view_settings(
     request: Request,
     saved: int = 0,
+    pushable: int = 0,
     state: AppState = Depends(get_state),
 ):
     # Prefer the currently-displayed image — its pipeline cache is already
@@ -43,6 +44,9 @@ async def view_settings(
             "s": state.settings,
             "preview_id": preview_id,
             "saved": bool(saved),
+            # Only render-affecting saves produce a new panel image worth
+            # pushing, so only they raise the "push to frame?" prompt.
+            "pushable": bool(pushable),
             # Cache-buster for the current-img <img src> so the browser
             # re-fetches /preview.png after a save (the underlying cache
             # file's contents change but the URL is the same).
@@ -75,6 +79,17 @@ async def update_settings(
     refresh_seconds = max(60, int(refresh_minutes) * 60)
     metrics_refresh_seconds = max(1, int(metrics_refresh_seconds))
     s = state.settings
+    # Only a change to a render-affecting setting produces a new panel render
+    # worth pushing — so only those should raise the "push to frame?" prompt.
+    # Schedule/UI settings (refresh interval, selection mode, quiet hours,
+    # metrics refresh) save silently.
+    render_changed = (
+        orientation != s.orientation
+        or crop_mode != s.crop_mode
+        or dither != s.dither
+        or saturation != s.saturation
+        or contrast != s.contrast
+    )
     s.orientation = orientation  # type: ignore[assignment]
     s.refresh_seconds = refresh_seconds
     s.selection_mode = selection_mode  # type: ignore[assignment]
@@ -102,4 +117,5 @@ async def update_settings(
     }.items():
         set_setting(state.engine, k, v)
 
-    return RedirectResponse(url="/settings?saved=1", status_code=303)
+    url = "/settings?saved=1&pushable=1" if render_changed else "/settings?saved=1"
+    return RedirectResponse(url=url, status_code=303)
