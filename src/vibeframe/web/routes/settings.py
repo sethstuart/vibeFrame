@@ -75,9 +75,11 @@ async def update_settings(
     quiet_start: str = Form(...),
     quiet_end: str = Form(...),
     metrics_refresh_seconds: int = Form(...),
+    cache_max_mb: int = Form(...),
 ):
     refresh_seconds = max(60, int(refresh_minutes) * 60)
     metrics_refresh_seconds = max(1, int(metrics_refresh_seconds))
+    cache_max_bytes = max(1, int(cache_max_mb)) * 1024 * 1024
     s = state.settings
     # Only a change to a render-affecting setting produces a new panel render
     # worth pushing — so only those should raise the "push to frame?" prompt.
@@ -101,6 +103,11 @@ async def update_settings(
     s.quiet_start = _parse_time(quiet_start)
     s.quiet_end = _parse_time(quiet_end)
     s.metrics_refresh_seconds = metrics_refresh_seconds
+    s.cache_max_bytes = cache_max_bytes
+    # The live Cache holds its own copy of the cap; update it and enforce a
+    # lowered limit immediately rather than waiting for the next write.
+    state.cache.max_bytes = cache_max_bytes
+    state.cache.evict_if_needed()
 
     for k, v in {
         "orientation": str(orientation),
@@ -114,8 +121,27 @@ async def update_settings(
         "quiet_start": quiet_start,
         "quiet_end": quiet_end,
         "metrics_refresh_seconds": str(metrics_refresh_seconds),
+        "cache_max_bytes": str(cache_max_bytes),
     }.items():
         set_setting(state.engine, k, v)
 
     url = "/settings?saved=1&pushable=1" if render_changed else "/settings?saved=1"
     return RedirectResponse(url=url, status_code=303)
+
+
+@router.post("/clear-cache", dependencies=[Depends(require_token)])
+async def clear_cache(state: AppState = Depends(get_state)):
+    """Delete cached renders to free disk, keeping the image currently on the
+    panel so the home hero's panel-render link and the live-preview "before"
+    stay instant (no re-render hitch right after clearing)."""
+    keep: set[str] = set()
+    current = state.scheduler.last_path
+    if not current:
+        # Nothing fully shown yet (e.g. just booted / mid-first-refresh) — fall
+        # back to whatever is being rendered right now.
+        current = state.scheduler.refresh_tracker.snapshot().get("image_path")
+    if current:
+        img = state.library.get_by_path(current)
+        if img is not None:
+            keep.add(img.sha256)
+    return state.cache.clear(keep_sources=keep)

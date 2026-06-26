@@ -159,7 +159,7 @@ pytest
 
 ## Configuration reference
 
-Environment variables prefixed `VIBEFRAME_` set the **defaults**. See `.env.example` for the canonical list. Note: the display/tone/schedule settings (orientation, refresh interval, selection mode, dither, crop mode, saturation, contrast, quiet hours) can also be changed at runtime in the web UI's Settings page — those are persisted to SQLite and applied *over* the env defaults on the next boot, so a saved setting survives container restarts. Highlights:
+Environment variables prefixed `VIBEFRAME_` set the **defaults**. See `.env.example` for the canonical list. Note: the display/tone/schedule settings (orientation, refresh interval, selection mode, dither, crop mode, saturation, contrast, quiet hours, metrics refresh, cache size) can also be changed at runtime in the web UI's Settings page — those are persisted to SQLite and applied *over* the env defaults on the next boot, so a saved setting survives container restarts. The Settings page also has a "clear cache" action (it keeps the image currently on the panel). Highlights:
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -175,6 +175,7 @@ Environment variables prefixed `VIBEFRAME_` set the **defaults**. See `.env.exam
 | `VIBEFRAME_TZ` | `UTC` | IANA timezone for quiet hours. |
 | `VIBEFRAME_DRIVER` | `auto` | `auto` (real Inky if available, fall back to mock), `mock`. |
 | `VIBEFRAME_METRICS_REFRESH_SECONDS` | `10` | How often the Metrics page auto-refreshes. |
+| `VIBEFRAME_CACHE_MAX_BYTES` | `524288000` | Disk-cache cap (500 MB). LRU-evicted by last shown; also editable as MB in Settings. |
 | `VIBEFRAME_WEB_TOKEN` | _(unset)_ | If set, write endpoints require `X-Vibeframe-Token: <value>`. |
 
 ---

@@ -151,6 +151,7 @@ def test_settings_push_prompt_only_on_render_change(tmp_settings):
         "quiet_start": "22:00",
         "quiet_end": "07:00",
         "metrics_refresh_seconds": 10,
+        "cache_max_mb": 500,
     }
 
     async def run():

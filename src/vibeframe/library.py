@@ -226,6 +226,10 @@ class ImageLibrary:
         with Session(self.engine) as session:
             return session.get(Image, image_id)
 
+    def get_by_path(self, path: str) -> Image | None:
+        with Session(self.engine) as session:
+            return session.exec(select(Image).where(Image.path == path)).first()
+
     def all_ids(self, favorites_only: bool = False) -> list[int]:
         with Session(self.engine) as session:
             if favorites_only:

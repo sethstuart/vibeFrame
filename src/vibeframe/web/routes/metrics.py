@@ -60,6 +60,11 @@ def _tile_context(state: AppState, snap: dict) -> dict:
     nfs_reachable = photos_dir.is_dir()
     nfs_read_ms = _avg_ms(snap, "pipeline.image.open")
     nfs_write_ms = _avg_ms(snap, "nfs.write")
+
+    # Disk cache footprint vs the configured cap.
+    cache = state.cache.usage()
+    cache_max = state.cache.max_bytes
+    mb = 1024 * 1024
     return {
         "proc_total_seconds": proc_total_ms / 1000.0,
         "proc_stages": proc_stages,
@@ -69,6 +74,10 @@ def _tile_context(state: AppState, snap: dict) -> dict:
         "nfs_read_ms": nfs_read_ms,
         "nfs_write_ms": nfs_write_ms,
         "image_count": state.library.count(),
+        "cache_used_mb": cache["bytes"] / mb,
+        "cache_max_mb": cache_max / mb,
+        "cache_count": cache["count"],
+        "cache_pct": (cache["bytes"] / cache_max * 100.0) if cache_max else 0.0,
     }
 
 

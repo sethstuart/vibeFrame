@@ -61,6 +61,37 @@
                value="{{ s.metrics_refresh_seconds }}" class="text-input" />
       {% endcall %}
     </div>
+
+    <div class="settings-section" x-data="clearCache()">
+      <h3>Cache</h3>
+      {% call field('Cache size (MB)', 'cache_max_mb', help='Rendered images are cached on disk; the least-recently-shown are evicted once usage exceeds this.') %}
+        <input id="cache_max_mb" name="cache_max_mb" type="number" min="1"
+               value="{{ (s.cache_max_bytes / 1048576)|round|int }}" class="text-input" />
+      {% endcall %}
+      <div class="field">
+        <label>Clear cache</label>
+        <button type="button" class="btn btn-secondary sm" @click="ask()">Clear cache…</button>
+        <span class="help">Frees disk by deleting cached renders. The image currently on the panel is kept.</span>
+      </div>
+
+      <!-- Confirm + result toast (fixed position; the confirm reuses the
+           push-toast shell so it persists until the user acts). -->
+      <div class="toast-host" x-show="open || result" x-cloak>
+        <div class="toast toast-warn push-toast" x-show="open" x-cloak>
+          <strong>Clear cache?</strong>
+          <p>Deletes all cached renders except the image currently on the panel.</p>
+          <div class="actions" style="display:flex; gap: var(--space-2); margin-top: var(--space-2);">
+            <button type="button" class="btn btn-danger sm" @click="clearNow()" x-show="!busy">Yes, clear</button>
+            <button type="button" class="btn btn-ghost sm" @click="open = false" x-show="!busy">Cancel</button>
+            <span class="muted" x-show="busy" x-cloak>Clearing…</span>
+          </div>
+        </div>
+        <div class="toast toast-ok" x-show="result" x-cloak>
+          <strong>Cache cleared</strong>
+          <p x-text="result"></p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <aside class="stack" x-data="{ dirty: false }">
@@ -127,6 +158,32 @@
       }, 0);
     });
   })();
+
+  // Clear-cache confirm/result flow. The button opens a confirm toast; "Yes"
+  // POSTs to /settings/clear-cache (which keeps the currently-shown image) and
+  // reports how much was freed.
+  function clearCache() {
+    return {
+      open: false,
+      busy: false,
+      result: '',
+      ask() { this.result = ''; this.open = true; },
+      async clearNow() {
+        this.busy = true;
+        try {
+          const r = await fetch('/settings/clear-cache', { method: 'POST' });
+          const j = await r.json();
+          const mb = (j.freed_bytes / 1048576).toFixed(1);
+          this.result = `Removed ${j.removed} file${j.removed === 1 ? '' : 's'} (${mb} MB), kept ${j.kept}.`;
+        } catch {
+          this.result = 'Clear failed — see logs.';
+        }
+        this.busy = false;
+        this.open = false;
+        setTimeout(() => { this.result = ''; }, 8000);
+      },
+    };
+  }
 </script>
 
 {% if pushable and preview_id %}

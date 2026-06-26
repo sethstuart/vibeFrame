@@ -59,6 +59,45 @@ class Cache:
             except FileNotFoundError:
                 pass
 
+    def usage(self) -> dict[str, int]:
+        """Current on-disk footprint across both cache layers (dithered output
+        + prepared crops): total bytes and file count."""
+        total = 0
+        count = 0
+        for p in self.root.rglob("*.png"):
+            try:
+                total += p.stat().st_size
+                count += 1
+            except FileNotFoundError:
+                pass
+        return {"bytes": total, "count": count}
+
+    def clear(self, keep_sources: set[str] | None = None) -> dict[str, int]:
+        """Delete every cached PNG except those belonging to a source in
+        `keep_sources`, matched across both the dithered (`<sha>-…`) and the
+        prepared (`prepared-<sha>-…`) layers. Returns counts of what happened.
+
+        Used by the "clear cache" action, which keeps the currently-displayed
+        image so the home hero's panel-render link and the settings live-
+        preview "before" stay instant instead of forcing an immediate re-render.
+        """
+        keep_prefixes = tuple(
+            pre for s in (keep_sources or set()) for pre in (f"{s}-", f"prepared-{s}-")
+        )
+        removed = freed = kept = 0
+        for p in self.root.rglob("*.png"):
+            if keep_prefixes and p.name.startswith(keep_prefixes):
+                kept += 1
+                continue
+            try:
+                size = p.stat().st_size
+                p.unlink()
+                removed += 1
+                freed += size
+            except FileNotFoundError:
+                pass
+        return {"removed": removed, "freed_bytes": freed, "kept": kept}
+
     def invalidate_source(self, source_sha256: str) -> int:
         bucket = self.root / source_sha256[:2]
         if not bucket.is_dir():

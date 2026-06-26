@@ -23,6 +23,13 @@
     </div>
   </div>
   <div class="card padded status-tile">
+    <div class="label">Disk cache</div>
+    <div class="value">{{ '%.0f'|format(cache_used_mb) }}<span class="unit">/ {{ '%.0f'|format(cache_max_mb) }} MB</span></div>
+    <div class="muted" style="font-family: var(--font-mono); font-size: var(--text-xs); margin-top: 4px;">
+      {{ '%.0f'|format(cache_pct) }}% full · {{ cache_count }} file{{ 's' if cache_count != 1 else '' }}
+    </div>
+  </div>
+  <div class="card padded status-tile">
     <div class="label">NFS storage</div>
     <div class="value" style="font-size: var(--text-md);">
       {% if nfs_reachable %}
