@@ -14,7 +14,7 @@
     </div>
     <div class="muted" style="font-family: var(--font-mono); font-size: var(--text-xs); margin-top: 4px;">
       {% if proc_stages %}
-        {% for st in proc_stages %}{{ st.label }} {{ '%.0f'|format(st.ms) }}{% if not loop.last %} · {% endif %}{% endfor %} ms
+        {% for st in proc_stages %}{{ st.label }} {{ '%.0f'|format(st.ms) }} ms{% if not loop.last %} · {% endif %}{% endfor %}
       {% elif proc_hit_count %}
         {{ proc_hit_count }} cache hit{{ 's' if proc_hit_count != 1 else '' }} since restart · no full render yet
       {% else %}
