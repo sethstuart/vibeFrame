@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     refresh_seconds: int = Field(default=1800, ge=10)
     selection_mode: SelectionMode = "shuffle"
 
+    quiet_hours_enabled: bool = True
     quiet_start: time = time(22, 0)
     quiet_end: time = time(7, 0)
     tz: str = "UTC"

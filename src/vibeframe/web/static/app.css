@@ -376,6 +376,17 @@ input[type="range"] {
   accent-color: var(--accent);
 }
 
+.checkbox-row {
+  display: flex; align-items: center; gap: var(--space-3);
+  font-size: var(--text-sm); color: var(--text-primary);
+  cursor: pointer;
+}
+.checkbox-row input[type="checkbox"] {
+  width: 1.1em; height: 1.1em;
+  accent-color: var(--accent);
+  flex: none;
+}
+
 /* ──────────────────────────────────────── Toast ──────── */
 #toast-host {
   position: fixed; z-index: var(--z-toast);

@@ -170,7 +170,8 @@ Environment variables prefixed `VIBEFRAME_` set the **defaults**. See `.env.exam
 | `VIBEFRAME_SELECTION_MODE` | `shuffle` | `shuffle`, `sequential`, `favorites`, `recent`. |
 | `VIBEFRAME_DITHER` | `floyd-steinberg` | `floyd-steinberg`, `atkinson`, `bayer`, `none`. |
 | `VIBEFRAME_CROP_MODE` | `smart` | `smart`, `center`, `fit`. |
-| `VIBEFRAME_QUIET_START` / `_END` | `22:00` / `07:00` | Skip refreshes during this window. |
+| `VIBEFRAME_QUIET_HOURS_ENABLED` | `true` | Master on/off for quiet hours. When off, the frame refreshes around the clock. |
+| `VIBEFRAME_QUIET_START` / `_END` | `22:00` / `07:00` | Skip refreshes during this window. "Show next" / "Show now" always override it. |
 | `VIBEFRAME_TZ` | `UTC` | IANA timezone for quiet hours. |
 | `VIBEFRAME_DRIVER` | `auto` | `auto` (real Inky if available, fall back to mock), `mock`. |
 | `VIBEFRAME_WEB_TOKEN` | _(unset)_ | If set, write endpoints require `X-Vibeframe-Token: <value>`. |

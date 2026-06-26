@@ -43,6 +43,13 @@
       {% call field('Selection mode', 'selection_mode') %}
         {{ select_input('selection_mode', ['shuffle', 'sequential', 'favorites', 'recent'], current=s.selection_mode) }}
       {% endcall %}
+      {% call field('Quiet hours', 'quiet_hours_enabled', help='When off, the frame refreshes around the clock. “Show next” and “Show now” always override quiet hours.') %}
+        <label class="checkbox-row">
+          <input id="quiet_hours_enabled" name="quiet_hours_enabled" type="checkbox" value="true"
+                 {% if s.quiet_hours_enabled %}checked{% endif %} />
+          <span>Pause refreshes during quiet hours</span>
+        </label>
+      {% endcall %}
       {% call field('Quiet hours start', 'quiet_start') %}
         <input id="quiet_start" name="quiet_start" type="time" value="{{ s.quiet_start.strftime('%H:%M') }}" class="text-input" />
       {% endcall %}

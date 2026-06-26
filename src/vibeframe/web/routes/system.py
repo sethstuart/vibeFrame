@@ -16,7 +16,9 @@ router = APIRouter(tags=["system"])
 
 def _system_status(state: AppState) -> dict:
     now_local = datetime.now(tz=state.settings.zoneinfo)
-    in_quiet = is_quiet(now_local, state.settings.quiet_start, state.settings.quiet_end)
+    in_quiet = state.settings.quiet_hours_enabled and is_quiet(
+        now_local, state.settings.quiet_start, state.settings.quiet_end
+    )
     next_due = state.scheduler.next_due_at
     if state.scheduler.busy:
         kind = "busy"
@@ -75,7 +77,8 @@ def _now_showing_context(state: AppState) -> dict:
         # Used as a cache-busting query string on the thumb so the browser
         # actually re-fetches when the image changes.
         "last_shown_ts": int(last_shown_at.timestamp()) if last_shown_at else 0,
-        "in_quiet": is_quiet(now_local, state.settings.quiet_start, state.settings.quiet_end),
+        "in_quiet": state.settings.quiet_hours_enabled
+        and is_quiet(now_local, state.settings.quiet_start, state.settings.quiet_end),
         "s": state.settings,
     }
 
@@ -143,7 +146,7 @@ def system_recent(limit: int = 12, state: AppState = Depends(get_state)):
 
 @router.post("/system/next", dependencies=[Depends(require_token)])
 async def trigger_next(state: AppState = Depends(get_state)):
-    state.scheduler.kick.set()
+    state.scheduler.force_next()
     return {"queued": True}
 
 

@@ -78,6 +78,9 @@ class Scheduler:
         self._stop = asyncio.Event()
         # One-shot override consulted by _pick_next. Cleared after use.
         self._next_override: int | None = None
+        # One-shot flag set by manual triggers ("show next now", library
+        # "show now"). Bypasses quiet hours for that single refresh.
+        self._force_next = False
         self._busy = False
         self._next_due_at: datetime | None = None
         # Live render progress for the web UI's home page (circular spinner,
@@ -106,7 +109,15 @@ class Scheduler:
         step_start = perf_counter()
         tz: ZoneInfo = self.settings.zoneinfo
         now_local = datetime.now(tz=tz)
-        if is_quiet(now_local, self.settings.quiet_start, self.settings.quiet_end):
+        # Manual triggers force a refresh even inside quiet hours; the periodic
+        # tick honours both the enable toggle and the window.
+        force = self._force_next
+        self._force_next = False
+        if (
+            not force
+            and self.settings.quiet_hours_enabled
+            and is_quiet(now_local, self.settings.quiet_start, self.settings.quiet_end)
+        ):
             log.debug("inside quiet hours; skipping refresh")
             return
 
@@ -157,8 +168,16 @@ class Scheduler:
         self.kick.set()
 
     def show_now(self, image_id: int) -> None:
-        """Queue a specific image to be the next refresh and kick the loop."""
+        """Queue a specific image to be the next refresh and kick the loop.
+        A manual "show now" overrides quiet hours."""
         self._next_override = image_id
+        self._force_next = True
+        self.kick.set()
+
+    def force_next(self) -> None:
+        """Advance to the next image now, bypassing quiet hours ("show next
+        now")."""
+        self._force_next = True
         self.kick.set()
 
     @property

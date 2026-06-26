@@ -67,6 +67,7 @@ async def update_settings(
     crop_mode: str = Form(...),
     saturation: float = Form(...),
     contrast: float = Form(...),
+    quiet_hours_enabled: bool = Form(False),
     quiet_start: str = Form(...),
     quiet_end: str = Form(...),
 ):
@@ -79,6 +80,7 @@ async def update_settings(
     s.crop_mode = crop_mode  # type: ignore[assignment]
     s.saturation = saturation
     s.contrast = contrast
+    s.quiet_hours_enabled = quiet_hours_enabled
     s.quiet_start = _parse_time(quiet_start)
     s.quiet_end = _parse_time(quiet_end)
 
@@ -90,6 +92,7 @@ async def update_settings(
         "crop_mode": crop_mode,
         "saturation": str(saturation),
         "contrast": str(contrast),
+        "quiet_hours_enabled": "1" if quiet_hours_enabled else "0",
         "quiet_start": quiet_start,
         "quiet_end": quiet_end,
     }.items():

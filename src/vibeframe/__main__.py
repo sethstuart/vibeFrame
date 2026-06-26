@@ -33,6 +33,9 @@ def _restore_persisted_settings(settings: Settings, engine) -> None:
         hh, mm = value.split(":", 1)
         return _time(int(hh), int(mm))
 
+    def _parse_bool(value: str) -> bool:
+        return value.strip().lower() in ("1", "true", "yes", "on")
+
     fields = [
         ("orientation", int),
         ("refresh_seconds", int),
@@ -41,6 +44,7 @@ def _restore_persisted_settings(settings: Settings, engine) -> None:
         ("crop_mode", str),
         ("saturation", float),
         ("contrast", float),
+        ("quiet_hours_enabled", _parse_bool),
         ("quiet_start", _parse_time),
         ("quiet_end", _parse_time),
     ]
