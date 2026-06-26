@@ -6,7 +6,17 @@
 <section class="status-tiles">
   {{ status_tile('Tracked stages', rows|length) }}
   {{ status_tile('Slow rows', rows|selectattr('p95_ms', 'gt', 1000)|list|length, unit='p95 > 1s') }}
-  {{ status_tile('Avg image processing', '%.2f'|format(avg_proc_seconds), unit='s') }}
+  <div class="card padded status-tile">
+    <div class="label">Avg image processing</div>
+    <div class="value">{{ '%.2f'|format(proc_total_seconds) }}<span class="unit">s</span></div>
+    <div class="muted" style="font-family: var(--font-mono); font-size: var(--text-xs); margin-top: 4px;">
+      {% if proc_stages %}
+        {% for st in proc_stages %}{{ st.label }} {{ '%.0f'|format(st.ms) }}{% if not loop.last %} · {% endif %}{% endfor %} ms
+      {% else %}
+        no full renders yet
+      {% endif %}
+    </div>
+  </div>
   <div class="card padded status-tile">
     <div class="label">NFS storage</div>
     <div class="value" style="font-size: var(--text-md);">

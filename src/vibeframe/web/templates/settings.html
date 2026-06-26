@@ -56,6 +56,10 @@
       {% call field('Quiet hours end', 'quiet_end') %}
         <input id="quiet_end" name="quiet_end" type="time" value="{{ s.quiet_end.strftime('%H:%M') }}" class="text-input" />
       {% endcall %}
+      {% call field('Metrics auto-refresh (seconds)', 'metrics_refresh_seconds', help='How often the Metrics page re-polls. Applies on the next metrics page load.') %}
+        <input id="metrics_refresh_seconds" name="metrics_refresh_seconds" type="number" min="1"
+               value="{{ s.metrics_refresh_seconds }}" class="text-input" />
+      {% endcall %}
     </div>
   </div>
 

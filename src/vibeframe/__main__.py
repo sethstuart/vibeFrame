@@ -47,6 +47,7 @@ def _restore_persisted_settings(settings: Settings, engine) -> None:
         ("quiet_hours_enabled", _parse_bool),
         ("quiet_start", _parse_time),
         ("quiet_end", _parse_time),
+        ("metrics_refresh_seconds", int),
     ]
     for name, parse in fields:
         raw = get_setting(engine, name)

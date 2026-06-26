@@ -20,13 +20,34 @@ def _avg_ms(snap: dict, name: str) -> float:
     return (total / count * 1000.0) if count else 0.0
 
 
+def _avg_ms_prefix(snap: dict, prefix: str) -> float:
+    """Lifetime avg over every key under `prefix`, collapsing the mode/algo
+    suffix (e.g. pipeline.crop.smart vs .center, pipeline.dither.atkinson vs
+    .floyd-steinberg) into one figure."""
+    total = 0.0
+    count = 0
+    for name, s in snap.items():
+        if name.startswith(prefix):
+            total += s.get("total_seconds", 0.0)
+            count += s.get("count", 0)
+    return (total / count * 1000.0) if count else 0.0
+
+
 def _tile_context(state: AppState, snap: dict) -> dict:
-    # Average image processing = mean of pipeline.process.miss + .hit weighted.
-    miss = snap.get("pipeline.process.miss", {})
-    hit = snap.get("pipeline.process.hit", {})
-    total_count = miss.get("count", 0) + hit.get("count", 0)
-    total_seconds = miss.get("total_seconds", 0.0) + hit.get("total_seconds", 0.0)
-    avg_proc_s = (total_seconds / total_count) if total_count else 0.0
+    # Full image-processing time = a cache-miss render (decode → crop → tonemap
+    # → dither → quantize), which excludes the ~38s driver.inky.show panel push
+    # (recorded separately by the scheduler after process() returns).
+    proc_total_ms = _avg_ms(snap, "pipeline.process.miss")
+    # Notable per-stage averages for the breakdown subtext. Crop and dither use
+    # prefix matching since their key carries the active mode/algorithm.
+    stages = [
+        ("decode", _avg_ms(snap, "pipeline.image.open")),
+        ("crop", _avg_ms_prefix(snap, "pipeline.crop.")),
+        ("tonemap", _avg_ms(snap, "pipeline.tonemap")),
+        ("dither", _avg_ms_prefix(snap, "pipeline.dither.")),
+        ("quantize", _avg_ms(snap, "pipeline.palette.build_p")),
+    ]
+    proc_stages = [{"label": label, "ms": ms} for label, ms in stages if ms > 0]
 
     # NFS status — photos_dir reachable + has at least one image; read = avg
     # of pipeline.image.open; write = avg of nfs.write.
@@ -35,7 +56,8 @@ def _tile_context(state: AppState, snap: dict) -> dict:
     nfs_read_ms = _avg_ms(snap, "pipeline.image.open")
     nfs_write_ms = _avg_ms(snap, "nfs.write")
     return {
-        "avg_proc_seconds": avg_proc_s,
+        "proc_total_seconds": proc_total_ms / 1000.0,
+        "proc_stages": proc_stages,
         "nfs_reachable": nfs_reachable,
         "nfs_read_ms": nfs_read_ms,
         "nfs_write_ms": nfs_write_ms,
@@ -59,7 +81,7 @@ def metrics_json():
 def metrics_html(request: Request, sort: str = "p95_ms", state: AppState = Depends(get_state)):
     snap = timing.snapshot()
     rows, sort_key = _sorted_rows(snap, sort)
-    ctx = {"rows": rows, "sort": sort_key, **_tile_context(state, snap)}
+    ctx = {"rows": rows, "sort": sort_key, "s": state.settings, **_tile_context(state, snap)}
     return request.app.state.templates.TemplateResponse(request, "metrics.html", ctx)
 
 

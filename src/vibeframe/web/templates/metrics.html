@@ -4,12 +4,12 @@
 {% block body %}
 <section class="page-title">
   <h1>Metrics</h1>
-  <span class="subtitle">window: last 256 samples per stage · auto-refresh every 5s</span>
+  <span class="subtitle">window: last 256 samples per stage · auto-refresh every {{ s.metrics_refresh_seconds }}s</span>
 </section>
 
 <div id="metrics-body"
      hx-get="/metrics/fragment?sort={{ sort }}"
-     hx-trigger="every 5s"
+     hx-trigger="every {{ s.metrics_refresh_seconds }}s"
      hx-swap="innerHTML">
   {% include "_metrics_body.html" %}
 </div>

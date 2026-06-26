@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     web_host: str = "0.0.0.0"
     web_port: int = Field(default=8080, ge=1, le=65535)
     web_token: str | None = None
+    metrics_refresh_seconds: int = Field(default=10, ge=1)
 
     log_level: str = "INFO"
     cache_max_bytes: int = Field(default=500 * 1024 * 1024, ge=1024 * 1024)

@@ -174,6 +174,7 @@ Environment variables prefixed `VIBEFRAME_` set the **defaults**. See `.env.exam
 | `VIBEFRAME_QUIET_START` / `_END` | `22:00` / `07:00` | Skip refreshes during this window. "Show next" / "Show now" always override it. |
 | `VIBEFRAME_TZ` | `UTC` | IANA timezone for quiet hours. |
 | `VIBEFRAME_DRIVER` | `auto` | `auto` (real Inky if available, fall back to mock), `mock`. |
+| `VIBEFRAME_METRICS_REFRESH_SECONDS` | `10` | How often the Metrics page auto-refreshes. |
 | `VIBEFRAME_WEB_TOKEN` | _(unset)_ | If set, write endpoints require `X-Vibeframe-Token: <value>`. |
 
 ---

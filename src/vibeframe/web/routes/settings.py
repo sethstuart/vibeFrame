@@ -70,8 +70,10 @@ async def update_settings(
     quiet_hours_enabled: bool = Form(False),
     quiet_start: str = Form(...),
     quiet_end: str = Form(...),
+    metrics_refresh_seconds: int = Form(...),
 ):
     refresh_seconds = max(60, int(refresh_minutes) * 60)
+    metrics_refresh_seconds = max(1, int(metrics_refresh_seconds))
     s = state.settings
     s.orientation = orientation  # type: ignore[assignment]
     s.refresh_seconds = refresh_seconds
@@ -83,6 +85,7 @@ async def update_settings(
     s.quiet_hours_enabled = quiet_hours_enabled
     s.quiet_start = _parse_time(quiet_start)
     s.quiet_end = _parse_time(quiet_end)
+    s.metrics_refresh_seconds = metrics_refresh_seconds
 
     for k, v in {
         "orientation": str(orientation),
@@ -95,6 +98,7 @@ async def update_settings(
         "quiet_hours_enabled": "1" if quiet_hours_enabled else "0",
         "quiet_start": quiet_start,
         "quiet_end": quiet_end,
+        "metrics_refresh_seconds": str(metrics_refresh_seconds),
     }.items():
         set_setting(state.engine, k, v)
 

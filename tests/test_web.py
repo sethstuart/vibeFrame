@@ -138,7 +138,7 @@ def test_html_pages_render(tmp_settings):
     async def run():
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            for path in ("/", "/images", "/settings"):
+            for path in ("/", "/images", "/settings", "/metrics", "/metrics/fragment"):
                 r = await client.get(path)
                 assert r.status_code == 200, f"{path} -> {r.status_code}: {r.text[:200]}"
                 assert "text/html" in r.headers["content-type"]
