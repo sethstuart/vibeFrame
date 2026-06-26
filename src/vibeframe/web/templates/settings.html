@@ -99,6 +99,25 @@
   </div>
 </form>
 
+<script>
+  // The slider macro updates its numeric readout via the range input's
+  // `oninput` handler, which doesn't fire on a form reset. So after a reset
+  // re-sync each slider's <span> to the (now restored) input value. The
+  // reset event fires *before* controls are restored, hence the deferred tick.
+  (function () {
+    const form = document.getElementById('settings-form');
+    if (!form) return;
+    form.addEventListener('reset', () => {
+      setTimeout(() => {
+        form.querySelectorAll('input[type="range"]').forEach((input) => {
+          const out = document.getElementById(input.id + '-out');
+          if (out) out.textContent = input.value;
+        });
+      }, 0);
+    });
+  })();
+</script>
+
 {% if saved and preview_id %}
 <div class="toast-host">
   <div class="toast toast-info push-toast" x-data="pushToast()"
