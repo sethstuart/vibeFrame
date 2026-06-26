@@ -35,33 +35,63 @@ document.addEventListener('alpine:init', () => {
      path still uses the form's HTMX submit. */
   Alpine.data('dropzone', () => ({
     dragOver: false,
+    _depth: 0,            // dragenter/leave counter so child elements don't flicker
+    async _upload(files) {
+      if (!files || !files.length) return;
+      const host = document.getElementById('toast-host');
+      const fd = new FormData();
+      for (const f of files) {
+        // Only forward actual files (a dragged file has a non-empty type or
+        // a filename); skip dragged text/links which arrive as 0 files anyway.
+        fd.append('files', f);
+      }
+      try {
+        const r = await fetch('/images/upload', {
+          method: 'POST',
+          body: fd,
+          headers: { 'HX-Request': 'true' },
+        });
+        const html = await r.text();
+        if (host) host.innerHTML = html;
+      } catch (e) {
+        if (host) {
+          host.innerHTML =
+            `<div class="toast toast-err"><strong>Upload failed</strong><span>${e}</span></div>`;
+        }
+      }
+    },
     init() {
-      ['dragenter', 'dragover'].forEach(e => this.$el.addEventListener(e, ev => {
-        ev.preventDefault(); this.dragOver = true;
-      }));
-      ['dragleave'].forEach(e => this.$el.addEventListener(e, ev => {
-        ev.preventDefault(); this.dragOver = false;
-      }));
-      this.$el.addEventListener('drop', async (ev) => {
+      // Global guard: stop the browser from navigating to / opening a file
+      // that's dropped anywhere on the page (the #1 reason drag-drop "does
+      // nothing" — the page just gets replaced by the raw image). Bind once.
+      if (!window.__vfDropGuard) {
+        window.__vfDropGuard = true;
+        window.addEventListener('dragover', (ev) => ev.preventDefault());
+        window.addEventListener('drop', (ev) => ev.preventDefault());
+      }
+
+      const zone = this.$el;
+      zone.addEventListener('dragenter', (ev) => {
         ev.preventDefault();
+        this._depth++;
+        this.dragOver = true;
+      });
+      zone.addEventListener('dragover', (ev) => {
+        ev.preventDefault();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
+      });
+      zone.addEventListener('dragleave', (ev) => {
+        ev.preventDefault();
+        this._depth = Math.max(0, this._depth - 1);
+        if (this._depth === 0) this.dragOver = false;
+      });
+      zone.addEventListener('drop', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this._depth = 0;
         this.dragOver = false;
         const files = ev.dataTransfer && ev.dataTransfer.files;
-        if (!files || !files.length) return;
-        const fd = new FormData();
-        for (const f of files) fd.append('files', f);
-        try {
-          const r = await fetch('/images/upload', {
-            method: 'POST',
-            body: fd,
-            headers: { 'HX-Request': 'true' },
-          });
-          const html = await r.text();
-          const host = document.getElementById('toast-host');
-          if (host) host.innerHTML = html;
-        } catch (e) {
-          const host = document.getElementById('toast-host');
-          if (host) host.innerHTML = `<div class="toast toast-err"><strong>Upload failed</strong><span>${e}</span></div>`;
-        }
+        this._upload(files);
       });
     },
   }));
