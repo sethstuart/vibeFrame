@@ -9,8 +9,8 @@ import sys
 import uvicorn
 
 from vibeframe.cache import Cache
-from vibeframe.config import get_settings
-from vibeframe.db import build_engine
+from vibeframe.config import Settings, get_settings
+from vibeframe.db import build_engine, get_setting
 from vibeframe.display import build_driver
 from vibeframe.library import ImageLibrary
 from vibeframe.progress import RenderTracker
@@ -21,6 +21,36 @@ from vibeframe.web.app import create_app
 from vibeframe.web.deps import AppState
 
 log = logging.getLogger("vibeframe")
+
+
+def _restore_persisted_settings(settings: Settings, engine) -> None:
+    """Overlay DB-persisted setting values onto the env-driven defaults
+    so changes made via the web UI survive a container restart."""
+    from datetime import time as _time
+
+    def _parse_time(value: str) -> _time:
+        hh, mm = value.split(":", 1)
+        return _time(int(hh), int(mm))
+
+    fields = [
+        ("orientation", int),
+        ("refresh_seconds", int),
+        ("selection_mode", str),
+        ("dither", str),
+        ("crop_mode", str),
+        ("saturation", float),
+        ("contrast", float),
+        ("quiet_start", _parse_time),
+        ("quiet_end", _parse_time),
+    ]
+    for name, parse in fields:
+        raw = get_setting(engine, name)
+        if raw is None:
+            continue
+        try:
+            setattr(settings, name, parse(raw))
+        except Exception as e:
+            log.warning("ignoring bad persisted setting %s=%r: %s", name, raw, e)
 
 
 def _setup_logging(level: str) -> None:
@@ -36,6 +66,7 @@ async def _serve() -> None:
     settings.ensure_dirs()
 
     engine = build_engine(settings.db_path)
+    _restore_persisted_settings(settings, engine)
     cache = Cache(settings.cache_dir, settings.cache_max_bytes)
     library = ImageLibrary(settings.photos_dir, engine, recursive=settings.recursive, cache=cache)
     library.scan()

@@ -60,7 +60,7 @@
            aria-label="Before / after compare">
         <!-- Current frame render (always visible base layer). -->
         <img class="after" id="current-img"
-             src="/images/{{ preview_id }}/preview.png"
+             src="/images/{{ preview_id }}/preview.png?v={{ ts }}"
              alt="On the frame now" />
         <!-- Proposed render (loaded only after first adjustment). -->
         <div class="before-wrap" id="proposed-wrap" x-show="dirty" x-cloak>
@@ -70,8 +70,14 @@
         <span class="handle" id="compare-handle" role="slider"
               tabindex="0" aria-label="Drag to compare"
               x-show="dirty" x-cloak></span>
-        <div class="compare-labels" x-show="dirty" x-cloak>
-          <span>Proposed</span><span>Current</span>
+        <!-- Two full-size strip overlays, each clipped to its side of the
+             divider. The label tags inside are absolutely positioned and
+             never move; clipping is what hides them as the divider crosses. -->
+        <div class="label-strip after-strip" x-show="dirty" x-cloak>
+          <span class="tag">After</span>
+        </div>
+        <div class="label-strip before-strip" x-show="dirty" x-cloak>
+          <span class="tag">Before</span>
         </div>
       </div>
       <p class="muted" style="margin-top: var(--space-3); font-size: var(--text-xs);"
@@ -92,6 +98,37 @@
     {{ button('Save', variant='primary', icon_name='check', type='submit') }}
   </div>
 </form>
+
+{% if saved and preview_id %}
+<div class="toast-host">
+  <div class="toast toast-info push-toast" x-data="pushToast()"
+       x-show="open" x-cloak x-init="schedule()">
+    <strong>Push to frame?</strong>
+    <p style="margin: var(--space-1) 0 var(--space-2);">Apply this render to the panel now?</p>
+    <div class="actions" style="display: flex; gap: var(--space-2);">
+      <button type="button" class="btn btn-primary sm" @click="pushNow()">Yes</button>
+      <button type="button" class="btn btn-ghost sm" @click="close()">Not now</button>
+    </div>
+  </div>
+</div>
+<script>
+  function pushToast() {
+    return {
+      open: true,
+      _t: null,
+      schedule() { this._t = setTimeout(() => this.close(), 7000); },
+      close() { this.open = false; clearTimeout(this._t); },
+      async pushNow() {
+        clearTimeout(this._t);
+        try {
+          await fetch('/images/{{ preview_id }}/show', { method: 'POST' });
+        } catch {}
+        this.open = false;
+      },
+    };
+  }
+</script>
+{% endif %}
 
 {% if preview_id %}
 <script>
@@ -117,6 +154,10 @@
     pct = Math.min(100, Math.max(0, pct));
     wrap.style.width = pct + '%';
     handle.style.left = pct + '%';
+    // Drive the label-strip clip-paths. Bounding boxes don't change; the
+    // strips themselves clip whichever side of the divider has been
+    // taken over by the other layer.
+    compare.style.setProperty('--pos', pct + '%');
   }
   syncWidth();
   setPct(50);
@@ -157,15 +198,9 @@
     } catch {}
   }
   function trigger() {
-    // First adjustment in this session: flip dirty, reveal the slider and
-    // the proposed layer. Subsequent adjustments just refresh the proposed
-    // image.
-    const state = window.Alpine && Alpine.$data ? Alpine.$data(aside) : null;
-    if (state && !state.dirty) {
-      state.dirty = true;
-      // Re-sync after layout repaints with the now-visible wrap.
-      requestAnimationFrame(syncWidth);
-    }
+    // Keep dirty=false until the render finishes — slider, labels and the
+    // proposed layer stay hidden so the user sees only the current frame
+    // render full-size while the new render is being computed.
     const data = new FormData(form);
     const params = new URLSearchParams();
     watch.forEach(k => { const v = data.get(k); if (v !== null) params.set(k, v); });
@@ -173,10 +208,19 @@
     prog.value = 0;
     stopPolling();
     pollTimer = setInterval(pollProgress, 250);
-    proposed.onload = proposed.onerror = () => {
+    proposed.onload = () => {
       prog.value = 100;
       setTimeout(() => prog.classList.remove('busy'), 200);
       stopPolling();
+      const state = window.Alpine && Alpine.$data ? Alpine.$data(aside) : null;
+      if (state && !state.dirty) {
+        state.dirty = true;
+        requestAnimationFrame(syncWidth);
+      }
+    };
+    proposed.onerror = () => {
+      stopPolling();
+      prog.classList.remove('busy');
     };
     proposed.src = `/images/{{ preview_id }}/render-with.png?${params.toString()}&cb=${Date.now()}`;
   }

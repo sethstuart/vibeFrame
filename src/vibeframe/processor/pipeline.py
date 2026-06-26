@@ -25,6 +25,12 @@ except Exception:  # pragma: no cover - environment-dependent
 DISPLAY_W = 800
 DISPLAY_H = 480
 
+# Bumped when the prepared-cache image format/contents change. The prepared
+# cache holds the image post-EXIF-transpose and post-crop (RGB at panel
+# resolution) so settings adjustments that don't touch crop/orientation can
+# skip the source decode + crop.
+PREPARED_PARAMS_VERSION = 1
+
 
 @dataclass(frozen=True)
 class ProcessedImage:
@@ -58,6 +64,23 @@ def _pipeline_params(settings: Settings, target_w: int, target_h: int) -> dict:
         "sat": round(settings.saturation, 3),
         "con": round(settings.contrast, 3),
     }
+
+
+def _prepared_cache_key(sha256: str, settings: Settings) -> CacheKey:
+    """Key for the post-EXIF-transpose post-crop cache. Independent of
+    tonemap/dither so saturation/contrast/dither changes reuse the entry."""
+    target_w, target_h = _target_size(settings.orientation)
+    params = {
+        "version": PREPARED_PARAMS_VERSION,
+        "w": target_w,
+        "h": target_h,
+        "crop": settings.crop_mode,
+        "orient": settings.orientation,
+    }
+    return CacheKey(
+        source_sha256=f"prepared-{sha256}",
+        params_hash=params_hash(params),
+    )
 
 
 def cached_png_bytes(
@@ -132,17 +155,42 @@ def process(
                 tracker.set_stage("cache_write", 95.0)
             return result
 
-    _advance(tracker, "decode")
-    with timed("pipeline.image.open"):
-        with Image.open(path) as img:
-            img.load()
-        _advance(tracker, "exif")
-        with timed("pipeline.exif.transpose"):
-            oriented = ImageOps.exif_transpose(img).convert("RGB")
+    # Prepared cache: post-EXIF-transpose + post-crop RGB image at panel
+    # resolution. If we hit it (same source + same orientation + same crop_mode),
+    # we skip image.open + exif + crop.
+    cropped: Image.Image | None = None
+    if cache is not None and isinstance(source_key, str) and not source_key.startswith("stat-"):
+        prep_key = _prepared_cache_key(source_key, settings)
+        with timed("pipeline.prepared.lookup"):
+            prep_path = cache.get(prep_key)
+        if prep_path is not None:
+            with timed("pipeline.prepared.load"):
+                # Reading the cached file gets us straight to the tonemap step.
+                cropped = Image.open(prep_path).convert("RGB")
+                cropped.load()
+    else:
+        prep_key = None
 
-    _advance(tracker, "crop")
-    with timed(f"pipeline.crop.{settings.crop_mode}"):
-        cropped = crop.crop_to(oriented, target_w, target_h, settings.crop_mode)
+    if cropped is None:
+        _advance(tracker, "decode")
+        with timed("pipeline.image.open"):
+            with Image.open(path) as img:
+                img.load()
+            _advance(tracker, "exif")
+            with timed("pipeline.exif.transpose"):
+                oriented = ImageOps.exif_transpose(img).convert("RGB")
+
+        _advance(tracker, "crop")
+        with timed(f"pipeline.crop.{settings.crop_mode}"):
+            cropped = crop.crop_to(oriented, target_w, target_h, settings.crop_mode)
+        # Write the prepared cache so subsequent renders (settings tweaks)
+        # skip straight to tonemap.
+        if cache is not None and prep_key is not None:
+            with timed("pipeline.prepared.write"):
+                buf = BytesIO()
+                cropped.save(buf, format="PNG")
+                cache.put_bytes(prep_key, buf.getvalue())
+
     _advance(tracker, "tonemap")
     with timed("pipeline.tonemap"):
         toned = tonemap.apply(cropped, settings.saturation, settings.contrast)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import time
+import time
+from datetime import time as dtime
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -12,7 +13,11 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 
 @router.get("", response_class=HTMLResponse)
-async def view_settings(request: Request, state: AppState = Depends(get_state)):
+async def view_settings(
+    request: Request,
+    saved: int = 0,
+    state: AppState = Depends(get_state),
+):
     # Prefer the currently-displayed image — its pipeline cache is already
     # warm so the live preview loads instantly and updates fast.
     last_path = state.scheduler.last_path
@@ -34,13 +39,21 @@ async def view_settings(request: Request, state: AppState = Depends(get_state)):
     return request.app.state.templates.TemplateResponse(
         request,
         "settings.html",
-        {"s": state.settings, "preview_id": preview_id},
+        {
+            "s": state.settings,
+            "preview_id": preview_id,
+            "saved": bool(saved),
+            # Cache-buster for the current-img <img src> so the browser
+            # re-fetches /preview.png after a save (the underlying cache
+            # file's contents change but the URL is the same).
+            "ts": int(time.time()),
+        },
     )
 
 
-def _parse_time(value: str) -> time:
+def _parse_time(value: str) -> dtime:
     hh, mm = value.split(":", 1)
-    return time(int(hh), int(mm))
+    return dtime(int(hh), int(mm))
 
 
 @router.post("", dependencies=[Depends(require_token)])
@@ -82,4 +95,4 @@ async def update_settings(
     }.items():
         set_setting(state.engine, k, v)
 
-    return RedirectResponse(url="/settings", status_code=303)
+    return RedirectResponse(url="/settings?saved=1", status_code=303)

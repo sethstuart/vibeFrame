@@ -213,10 +213,14 @@ def render_with(
     transient = _Settings(**base)
     state.preview_tracker.start(image_id, img.path)
     try:
+        # Pass the real cache so the rendered PNG is written under the cache
+        # key derived from these (proposed) settings. After the user saves,
+        # state.settings carries the same values, /preview.png hits this
+        # cache key, and the "before" image updates without re-rendering.
         processed = process(
             Path(img.path),
             transient,
-            cache=None,
+            cache=state.cache,
             sha256=img.sha256,
             tracker=state.preview_tracker,
         )

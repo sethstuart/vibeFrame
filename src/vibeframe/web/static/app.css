@@ -354,12 +354,23 @@ input[type="range"] {
 }
 
 /* ──────────────────────────────────────── Toast ──────── */
+#toast-host {
+  position: fixed; z-index: var(--z-toast);
+  top: calc(var(--header-height) + var(--space-3));
+  right: var(--space-4);
+  display: flex; flex-direction: column;
+  gap: var(--space-2);
+  max-width: min(360px, calc(100vw - var(--space-4) * 2));
+  pointer-events: none;
+}
+#toast-host > * { pointer-events: auto; }
+
 .toast {
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-sm);
   border: var(--border-hair) solid var(--border-default);
   background: var(--surface-raised);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
   animation: toast-fade 8s ease forwards;
 }
 .toast strong { display: block; font-family: var(--font-display); font-weight: var(--weight-semibold); }
@@ -367,11 +378,25 @@ input[type="range"] {
 .toast.toast-ok { background: var(--ok-bg); border-color: var(--ok-border); color: var(--ok); }
 .toast.toast-err { background: var(--err-bg); border-color: var(--err-border); color: var(--err); }
 .toast.toast-warn { background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn); }
+.toast.toast-info { background: var(--surface-raised); border-color: var(--accent); color: var(--text-primary); }
+.toast.push-toast { animation: none; }  /* user must click Yes/Not now or wait 7s JS timer */
+.toast.push-toast p { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); }
+
 @keyframes toast-fade {
   0% { opacity: 0; transform: translateY(-4px); }
   5% { opacity: 1; transform: translateY(0); }
   85% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+/* Toast-host is used in place of the old inline #upload-result host. The
+   settings page's push-toast injects an inline .toast-host element too;
+   make sure that element doesn't conflict with the fixed #toast-host. */
+.toast-host {
+  position: fixed; z-index: var(--z-toast);
+  top: calc(var(--header-height) + var(--space-3));
+  right: var(--space-4);
+  max-width: min(360px, calc(100vw - var(--space-4) * 2));
 }
 
 /* ──────────────────────────────────────── Pager ──────── */
@@ -732,15 +757,29 @@ main.app-main.fit-viewport .hero .hero-caption { flex: 0 0 auto; }
   border: var(--border-thick) solid var(--surface-raised);
   box-shadow: var(--shadow-sm);
 }
-.compare .compare-labels {
-  position: absolute; top: var(--space-2); left: var(--space-2); right: var(--space-2);
-  display: flex; justify-content: space-between;
-  pointer-events: none; z-index: 4;
+/* Label strips: two full-size overlays, each clipped to its side of the
+   divider. The labels inside are fixed-position relative to the strip;
+   their bounding boxes never change. As the divider crosses, the strip's
+   clip-path hides whichever side has been taken over by the other layer. */
+.compare .label-strip {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+.compare .label-strip .tag {
+  position: absolute; top: var(--space-3);
   font-family: var(--font-mono); font-size: var(--text-2xs);
   letter-spacing: var(--tracking-caps); text-transform: uppercase;
   color: var(--surface-raised);
-  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  background: rgba(28, 22, 16, 0.55);
+  padding: 4px var(--space-3);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
 }
+.compare .after-strip  .tag { left:  var(--space-3); }
+.compare .before-strip .tag { right: var(--space-3); }
+.compare .after-strip  { clip-path: inset(0 calc(100% - var(--pos, 50%)) 0 0); }
+.compare .before-strip { clip-path: inset(0 0 0 var(--pos, 50%)); }
 
 /* Linear preview progress bar — JS-driven determinate <progress>. */
 .preview-progress {

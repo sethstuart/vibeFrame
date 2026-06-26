@@ -56,5 +56,9 @@
       <li><a href="/metrics" class="{% if active == 'metrics' %}active{% endif %}">{{ icon('bar-chart', 22) }}Metrics</a></li>
     </ul>
   </nav>
+
+  {# Fixed-position toast host. Lives outside the .fit-viewport overflow:hidden
+     container so toasts (upload result, push-to-frame, etc.) never get clipped. #}
+  <div id="toast-host" aria-live="polite"></div>
 </body>
 </html>

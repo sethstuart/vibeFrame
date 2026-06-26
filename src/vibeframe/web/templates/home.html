@@ -69,7 +69,7 @@
     <form x-ref="form"
           hx-post="/images/upload"
           hx-encoding="multipart/form-data"
-          hx-target="#upload-result"
+          hx-target="#toast-host"
           hx-swap="innerHTML"
           hx-on::after-request="if(event.detail.successful) this.reset()">
       <input x-ref="input" type="file" name="files" accept="image/*" multiple hidden
@@ -79,7 +79,6 @@
       </p>
     </form>
   </div>
-  <div id="upload-result" aria-live="polite"></div>
 </section>
 
 <script>

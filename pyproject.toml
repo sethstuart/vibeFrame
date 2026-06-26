@@ -9,7 +9,6 @@ authors = [{ name = "Seth Stuart" }]
 
 dependencies = [
     "Pillow>=10.3",
-    "pillow-heif>=0.16",
     "numpy>=1.26",
     "opencv-python-headless>=4.9",
     "fastapi>=0.110",
@@ -20,7 +19,6 @@ dependencies = [
     "pydantic-settings>=2.2",
     "sqlmodel>=0.0.16",
     "watchdog>=4.0",
-    "python-dateutil>=2.9",
     "tzdata>=2024.1",
     "httpx>=0.27",
 ]
@@ -29,6 +27,12 @@ dependencies = [
 rpi = [
     "inky[rpi]>=1.5",
     "gpiod>=2.2",
+]
+# Pillow-heif lets you display .HEIC / .HEIF photos (iPhone-default format).
+# Keep it optional — it's a hefty native build and most photo libraries are
+# already JPEG/PNG.
+heif = [
+    "pillow-heif>=0.16",
 ]
 dev = [
     "ruff>=0.4",

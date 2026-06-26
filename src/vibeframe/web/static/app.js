@@ -29,23 +29,39 @@ document.addEventListener('alpine:init', () => {
     close() { this.open = false; this.current = null; },
   }));
 
-  /* Drag-drop upload zone. Forwards files to a hidden <input type="file">. */
+  /* Drag-drop upload zone. Bypasses the form on drop because programmatic
+     assignment to <input type="file">.files is browser-quirky on hidden
+     inputs — POST a manually-built FormData instead. The browse-button
+     path still uses the form's HTMX submit. */
   Alpine.data('dropzone', () => ({
     dragOver: false,
     init() {
-      const input = this.$refs.input;
-      const form = this.$refs.form;
       ['dragenter', 'dragover'].forEach(e => this.$el.addEventListener(e, ev => {
         ev.preventDefault(); this.dragOver = true;
       }));
-      ['dragleave', 'drop'].forEach(e => this.$el.addEventListener(e, ev => {
+      ['dragleave'].forEach(e => this.$el.addEventListener(e, ev => {
         ev.preventDefault(); this.dragOver = false;
       }));
-      this.$el.addEventListener('drop', ev => {
-        if (!ev.dataTransfer || !ev.dataTransfer.files.length) return;
-        input.files = ev.dataTransfer.files;
-        // dispatch a change so HTMX form sees it, then submit
-        form.requestSubmit();
+      this.$el.addEventListener('drop', async (ev) => {
+        ev.preventDefault();
+        this.dragOver = false;
+        const files = ev.dataTransfer && ev.dataTransfer.files;
+        if (!files || !files.length) return;
+        const fd = new FormData();
+        for (const f of files) fd.append('files', f);
+        try {
+          const r = await fetch('/images/upload', {
+            method: 'POST',
+            body: fd,
+            headers: { 'HX-Request': 'true' },
+          });
+          const html = await r.text();
+          const host = document.getElementById('toast-host');
+          if (host) host.innerHTML = html;
+        } catch (e) {
+          const host = document.getElementById('toast-host');
+          if (host) host.innerHTML = `<div class="toast toast-err"><strong>Upload failed</strong><span>${e}</span></div>`;
+        }
       });
     },
   }));

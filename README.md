@@ -50,10 +50,24 @@ cp .env.example .env
 ### 3. Deploy
 
 ```sh
-docker compose up -d
+docker compose up -d --build
 ```
 
 The web UI lands on `http://<pi-host>` (host port 80 → container port 8080).
+
+#### Rebuilding on the Pi
+
+If you've pulled new code and want to rebuild in place, **stop the
+existing container first** so the build doesn't fight the live process
+for RAM:
+
+```sh
+docker compose down && docker compose up -d --build
+```
+
+On a 4 GB Pi the running container holds ~200-300 MB of resident
+Python + numpy + opencv state; bringing it down before rebuilding
+prevents OOM-kills during the pip install / wheel build steps.
 
 ---
 
@@ -153,6 +167,15 @@ One Python process, one asyncio loop. The Inky SPI driver is not thread-safe, so
 
 vibeFrame has built-in lightweight timing for every hot path and a synthetic
 load harness for capturing clean numbers without waiting for real traffic.
+
+> **The pipeline floor is the dither.** Floyd-Steinberg on the Pi 4 takes
+> ~20 s per 480×800 image; Atkinson is ~50 s. Both are pure-Python error
+> diffusion loops over ~384 k pixels. The result is cached after the first
+> run, so subsequent shows of the same image are sub-second. To shave the
+> first-time cost, switch `VIBEFRAME_DITHER` to `bayer` (~10 ms) at the
+> cost of less smooth gradients. The post-EXIF + post-crop intermediate
+> is also cached, so settings tweaks that only touch
+> saturation/contrast/dither skip the source decode entirely.
 
 ### Live metrics
 
