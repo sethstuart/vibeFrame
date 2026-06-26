@@ -18,8 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin vibeframe \
- && mkdir -p /photos /var/cache/vibeframe /var/lib/vibeframe \
+ && mkdir -p /photos /var/cache/vibeframe /var/cache/vibeframe/numba /var/lib/vibeframe \
  && chown -R vibeframe:vibeframe /var/cache/vibeframe /var/lib/vibeframe
+
+# numba caches JIT'd code per-function in this dir. Default would be
+# __pycache__ next to the module, but that's installed as root-owned in
+# site-packages so the unprivileged vibeframe user can't write there.
+ENV NUMBA_CACHE_DIR=/var/cache/vibeframe/numba
 
 WORKDIR /app
 
@@ -28,13 +33,14 @@ COPY src ./src
 
 ARG INSTALL_RPI=1
 ARG INSTALL_PROFILE=0
+ARG INSTALL_DITHER=1
 RUN set -eu; \
     pip install --upgrade pip; \
     EXTRAS=""; \
-    if [ "$INSTALL_RPI" = "1" ]; then EXTRAS="rpi"; fi; \
-    if [ "$INSTALL_PROFILE" = "1" ]; then \
-        if [ -n "$EXTRAS" ]; then EXTRAS="$EXTRAS,profile"; else EXTRAS="profile"; fi; \
-    fi; \
+    add_extra() { if [ -z "$EXTRAS" ]; then EXTRAS="$1"; else EXTRAS="$EXTRAS,$1"; fi; }; \
+    if [ "$INSTALL_RPI" = "1" ]; then add_extra rpi; fi; \
+    if [ "$INSTALL_DITHER" = "1" ]; then add_extra dither; fi; \
+    if [ "$INSTALL_PROFILE" = "1" ]; then add_extra profile; fi; \
     if [ -n "$EXTRAS" ]; then SPEC=".[$EXTRAS]"; else SPEC="."; fi; \
     echo "Installing $SPEC"; \
     if [ "$INSTALL_RPI" = "1" ]; then \

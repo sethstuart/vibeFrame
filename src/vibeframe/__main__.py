@@ -13,6 +13,7 @@ from vibeframe.config import Settings, get_settings
 from vibeframe.db import build_engine, get_setting
 from vibeframe.display import build_driver
 from vibeframe.library import ImageLibrary
+from vibeframe.processor import dither as dither_mod
 from vibeframe.progress import RenderTracker
 from vibeframe.scheduler import Scheduler
 from vibeframe.thumb_warmer import ThumbWarmer
@@ -67,6 +68,9 @@ async def _serve() -> None:
 
     engine = build_engine(settings.db_path)
     _restore_persisted_settings(settings, engine)
+    # Pre-compile numba-JIT'd dither inner loops while the rest of the app is
+    # still booting. Subsequent process starts hit the on-disk cache (~10 ms).
+    dither_mod.prewarm()
     cache = Cache(settings.cache_dir, settings.cache_max_bytes)
     library = ImageLibrary(settings.photos_dir, engine, recursive=settings.recursive, cache=cache)
     library.scan()

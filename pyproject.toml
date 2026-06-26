@@ -34,6 +34,13 @@ rpi = [
 heif = [
     "pillow-heif>=0.16",
 ]
+# numba JIT-compiles the Floyd-Steinberg / Atkinson inner loops.
+# Without it the dither module falls back to a pure-numpy + Python loop
+# implementation; on the Pi 4 that's ~20s/image for FS. With numba it's
+# ~300ms. Pulls in llvmlite (~80 MB) so it's opt-in.
+dither = [
+    "numba>=0.59",
+]
 dev = [
     "ruff>=0.4",
     "pytest>=8.1",
@@ -53,6 +60,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vibeframe"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/vibeframe/processor/face_yunet.onnx" = "vibeframe/processor/face_yunet.onnx"
 
 [tool.ruff]
 line-length = 100
