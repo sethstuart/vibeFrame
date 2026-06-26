@@ -5,7 +5,7 @@
   ?offset={{ (page - 1) * limit }}&limit={{ limit }}{% if favorites_only %}&favorites_only=true{% endif %}{% if q %}&q={{ q }}{% endif %}{% if sort and sort != 'newest' %}&sort={{ sort }}{% endif %}
 {%- endmacro %}
 {% block body %}
-<div x-data="selection">
+<div x-data="libraryPage()">
   <section class="library-header">
     <h1>{% if favorites_only %}Favorites{% else %}Library{% endif %}
       <span class="count">{{ total }} {% if total == 1 %}image{% else %}images{% endif %}</span>
@@ -42,9 +42,13 @@
         {% if img.id in favorite_ids %}
         <span class="favorite-badge" aria-hidden="true">★</span>
         {% endif %}
-        <span class="select-toggle" @click="toggle({{ img.id }})"></span>
-        <img src="/images/{{ img.id }}/thumb.png" alt="{{ img.path }}" loading="lazy" />
-        <div class="actions">
+        <span class="select-toggle" @click.stop="toggle({{ img.id }})"></span>
+        <!-- Click anywhere on the thumb opens the lightbox unless we're
+             in multi-select mode (then the click toggles selection). -->
+        <img src="/images/{{ img.id }}/thumb.png" alt="{{ img.path }}" loading="lazy"
+             style="cursor: pointer;"
+             @click="mode ? toggle({{ img.id }}) : openLightbox({{ img.id }}, {{ img.path|tojson }})" />
+        <div class="actions" @click.stop>
           {% if img.id in favorite_ids %}
             {{ icon_button('star-filled', 'Unfavorite', extra='hx-delete="/favorites/' ~ img.id ~ '" hx-swap="none"') }}
           {% else %}
@@ -61,6 +65,17 @@
     {% else %}
     <p class="muted">No images.</p>
     {% endfor %}
+  </div>
+
+  <!-- Lightbox overlay. Click the backdrop or the × to dismiss. Esc also closes. -->
+  <div class="lightbox" x-show="lbOpen" x-cloak
+       @click.self="closeLightbox()"
+       @keydown.escape.window="closeLightbox()">
+    <button type="button" class="lightbox-close" aria-label="Close" @click="closeLightbox()">×</button>
+    <figure class="lightbox-figure" @click="closeLightbox()">
+      <img :src="lbId ? `/images/${lbId}/source-cropped.jpg` : ''" alt="" />
+      <figcaption x-text="lbPath ? lbPath.split('/').pop() : ''"></figcaption>
+    </figure>
   </div>
 
   <!-- Bulk action bar (only visible in selection mode with selections) -->
@@ -94,4 +109,29 @@
   <span class="meta">Page {{ current_page }} of {{ total_pages }}</span>
 </nav>
 {% endif %}
+
+<script>
+  // Single Alpine component combining multi-select and lightbox state for
+  // the library page. Keeps the photo card's @click handler readable.
+  function libraryPage() {
+    return {
+      mode: false,
+      ids: new Set(),
+      lbOpen: false,
+      lbId: null,
+      lbPath: null,
+      toggleMode() { this.mode = !this.mode; if (!this.mode) this.ids.clear(); },
+      toggle(id) {
+        if (this.ids.has(id)) this.ids.delete(id); else this.ids.add(id);
+        this.ids = new Set(this.ids);
+      },
+      has(id) { return this.ids.has(id); },
+      get count() { return this.ids.size; },
+      list() { return Array.from(this.ids); },
+      clear() { this.ids = new Set(); },
+      openLightbox(id, path) { this.lbId = id; this.lbPath = path; this.lbOpen = true; },
+      closeLightbox() { this.lbOpen = false; this.lbId = null; this.lbPath = null; },
+    };
+  }
+</script>
 {% endblock %}

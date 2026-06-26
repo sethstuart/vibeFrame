@@ -21,6 +21,11 @@ body {
   line-height: var(--role-body-leading);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Prevent any descendant from pushing the document wider than the
+     viewport (which would shove the sticky header + bottom nav off
+     screen). Wide content must scroll inside its own .table-scroll or
+     similar container. */
+  overflow-x: hidden;
 }
 a { color: var(--text-link); text-decoration: none; }
 a:hover { color: var(--accent-hover); }
@@ -100,6 +105,11 @@ main.app-main {
   padding: var(--space-6);
   max-width: var(--container-max);
   margin: 0 auto;
+  /* Clamp page width to the viewport. Without this, a wide descendant
+     (e.g. the metrics table) would push the page wider than the screen
+     on mobile, sliding the sticky header and bottom-nav off-axis. Wide
+     children now scroll inside their own containers (see .table-scroll). */
+  max-width: min(var(--container-max), 100vw);
 }
 
 /* Home page: flex column that fills viewport height so the hero row
@@ -129,15 +139,22 @@ main.app-main.fit-viewport > .hero {
   /* No align-items / justify-content — children stretch to fill width and
      the inner flex chain (fragment > image-frame) takes care of vertical. */
 }
-/* On mobile the bottom nav eats the last 64 px of the viewport, so the
-   .fit-viewport box has to leave room or its overflow:hidden chops the
-   upload zone behind it. */
+/* On mobile we drop the no-scroll guarantee entirely: the bottom nav,
+   sticky header and tall hero image leave almost no room for the action
+   bar / recent strip / upload zone in a viewport-locked layout. Let the
+   page scroll naturally. The .app-main flow already pads below for the
+   bottom nav via main.app-main itself (see rule above). */
 @media (max-width: 720px) {
   main.app-main.fit-viewport {
-    height: calc(100vh - var(--header-height) - 64px);
-    max-height: calc(100vh - var(--header-height) - 64px);
-    padding: var(--space-3) var(--space-4);
+    display: block;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    padding: var(--space-3) var(--space-4) calc(64px + var(--space-4));
+    gap: 0;            /* gap was a flex property; restore normal margins */
   }
+  main.app-main.fit-viewport > .hero { min-height: 70vh; }
+  main.app-main.fit-viewport > * + * { margin-top: var(--space-4); }
 }
 
 @media (max-width: 720px) {
@@ -640,28 +657,54 @@ main.app-main.fit-viewport .hero .hero-caption { flex: 0 0 auto; }
 /* ──────────────────────────────────────── Lightbox ──── */
 .lightbox {
   position: fixed; inset: 0; z-index: var(--z-modal);
-  background: rgba(28, 22, 16, 0.85);
+  background: rgba(20, 16, 10, 0.88);
   display: flex; align-items: center; justify-content: center;
   padding: var(--space-6);
+  cursor: zoom-out;
+  animation: lightbox-fade var(--dur-fast) ease-out;
 }
-.lightbox-content {
+@keyframes lightbox-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.lightbox .lightbox-figure {
+  margin: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  max-width: min(96vw, 1000px);
+  max-height: 92vh;
+  gap: var(--space-3);
+}
+.lightbox .lightbox-figure img {
+  max-width: 100%;
+  max-height: calc(92vh - 3rem);
+  object-fit: contain;
+  border: var(--border-hair) solid var(--border-default);
+  border-radius: var(--radius-xs);
   background: var(--surface-raised);
-  border-radius: var(--radius-md);
-  max-width: min(96vw, 900px); max-height: 92vh;
-  overflow: auto;
-  display: grid; grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-4);
-  padding: var(--space-4);
+  box-shadow: var(--shadow-lg);
 }
-@media (min-width: 720px) {
-  .lightbox-content { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.lightbox .lightbox-figure figcaption {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--surface-raised);
+  opacity: 0.85;
+  text-align: center;
+  word-break: break-all;
 }
-.lightbox-content img { image-rendering: pixelated; max-width: 100%; border: var(--border-hair) solid var(--border-default); border-radius: var(--radius-xs); }
 .lightbox-close {
-  position: absolute; top: var(--space-3); right: var(--space-3);
-  background: transparent; color: var(--surface-raised); border: 0;
+  position: absolute;
+  top: var(--space-4); right: var(--space-4);
+  width: 40px; height: 40px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.4); color: var(--surface-raised);
+  border: var(--border-hair) solid rgba(255,255,255,0.2);
+  border-radius: var(--radius-pill);
+  font-size: 1.5rem; line-height: 1;
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
 }
+.lightbox-close:hover { background: rgba(0,0,0,0.65); }
+.photo-card .thumb-wrap img { cursor: zoom-in; }
 
 /* ──────────────────────────────────────── Settings ──── */
 .settings-grid {
@@ -836,6 +879,23 @@ main.app-main.fit-viewport .hero .hero-caption { flex: 0 0 auto; }
 .metrics-toolbar {
   display: flex; align-items: center; gap: var(--space-3);
   margin: var(--space-3) 0 var(--space-2);
+}
+
+/* Horizontal-scroll container for the metrics table on narrow viewports.
+   The table stays at its natural minimum width; the container holds the
+   horizontal overflow so the page itself never widens past the viewport
+   (which would push the sticky header and the bottom nav off-screen). */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: var(--border-hair) solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+}
+.table-scroll > table.metrics {
+  border: 0;             /* container provides the chrome */
+  border-radius: 0;
+  min-width: 720px;      /* keep columns readable before scrolling kicks in */
 }
 
 table.metrics {
