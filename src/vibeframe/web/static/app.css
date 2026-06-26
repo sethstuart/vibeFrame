@@ -10,6 +10,12 @@
 
 /* ─────────────────────────────────────── reset & base ─── */
 *, *::before, *::after { box-sizing: border-box; }
+
+/* Alpine: hide x-cloak'd elements until Alpine initializes and applies the
+   real x-show state. Without this rule the full-screen lightbox overlay and
+   the sticky bulk-action bar render visibly for a beat on every page load
+   (and persist if Alpine is slow or errors), covering page content. */
+[x-cloak] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -587,10 +593,21 @@ main.app-main.fit-viewport .hero .hero-caption { flex: 0 0 auto; }
 .filter-bar .filter-controls { margin-left: auto; display: flex; gap: var(--space-2); }
 .filter-bar input[type="search"] { min-width: 160px; max-width: 280px; }
 
+/* Explicit column counts that all divide the page size (24) so every full
+   page tiles into a clean rectangle — no ragged half-empty last row.
+   2 (mobile) / 4 (tablet) / 6 (desktop): 24 % 2 == 24 % 4 == 24 % 6 == 0.
+   The previous auto-fill minmax(180px) forced 5 columns on a ~1100px
+   desktop, leaving the bottom-right cell of every 24-image page empty. */
 .photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
+}
+@media (min-width: 560px) {
+  .photo-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 900px) {
+  .photo-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 .photo-card {
   position: relative;
