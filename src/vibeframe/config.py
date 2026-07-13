@@ -51,6 +51,11 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
     cache_max_bytes: int = Field(default=500 * 1024 * 1024, ge=1024 * 1024)
+    # Hard ceiling on decoded image size. Any source above this many pixels is
+    # rejected rather than decoded, so a malicious/huge upload can't exhaust the
+    # Pi's memory. Generous enough for large phone photos (48-108 MP); JPEGs are
+    # additionally scaled down at decode time via draft().
+    max_image_pixels: int = Field(default=100_000_000, ge=1_000_000)
 
     @field_validator("tz")
     @classmethod
@@ -76,6 +81,10 @@ class Settings(BaseSettings):
     @property
     def db_path(self) -> Path:
         return self.state_dir / "vibeframe.db"
+
+    @property
+    def log_path(self) -> Path:
+        return self.state_dir / "vibeframe.log"
 
     @property
     def zoneinfo(self) -> ZoneInfo:

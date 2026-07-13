@@ -45,7 +45,13 @@ class Cache:
         return p
 
     def evict_if_needed(self) -> None:
-        entries = [(p.stat().st_atime, p.stat().st_size, p) for p in self.root.rglob("*.png")]
+        entries = []
+        for p in self.root.rglob("*.png"):
+            try:
+                st = p.stat()
+            except FileNotFoundError:
+                continue
+            entries.append((st.st_atime, st.st_size, p))
         total = sum(size for _, size, _ in entries)
         if total <= self.max_bytes:
             return

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from vibeframe import timing
-from vibeframe.web.deps import AppState, get_state
+from vibeframe.web.deps import AppState, get_state, require_token
 
 router = APIRouter(tags=["metrics"])
 
@@ -110,7 +110,7 @@ def metrics_fragment(request: Request, sort: str = "p95_ms", state: AppState = D
     return request.app.state.templates.TemplateResponse(request, "_metrics_body.html", ctx)
 
 
-@router.post("/metrics/clear")
+@router.post("/metrics/clear", dependencies=[Depends(require_token)])
 def metrics_clear():
     timing.clear()
     return {"cleared": True}

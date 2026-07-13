@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import time as dtime
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import ValidationError
 
+from vibeframe.config import Settings
 from vibeframe.db import set_setting
 from vibeframe.web.deps import AppState, get_state, require_token
 
@@ -81,6 +84,37 @@ async def update_settings(
     metrics_refresh_seconds = max(1, int(metrics_refresh_seconds))
     cache_max_bytes = max(1, int(cache_max_mb)) * 1024 * 1024
     s = state.settings
+
+    try:
+        quiet_start_t = _parse_time(quiet_start)
+        quiet_end_t = _parse_time(quiet_end)
+    except (ValueError, IndexError) as e:
+        raise HTTPException(status_code=422, detail=f"invalid time value: {e}") from e
+
+    # Validate the full proposed config (Literal choices + numeric bounds) before
+    # mutating shared state or persisting: a bogus value (e.g. dither=pwn) would
+    # otherwise be stored and then raise on every render, silently wedging the
+    # frame until fixed by hand.
+    candidate = s.model_dump()
+    candidate.update(
+        orientation=orientation,
+        refresh_seconds=refresh_seconds,
+        selection_mode=selection_mode,
+        dither=dither,
+        crop_mode=crop_mode,
+        saturation=saturation,
+        contrast=contrast,
+        quiet_hours_enabled=quiet_hours_enabled,
+        quiet_start=quiet_start_t,
+        quiet_end=quiet_end_t,
+        metrics_refresh_seconds=metrics_refresh_seconds,
+        cache_max_bytes=cache_max_bytes,
+    )
+    try:
+        Settings(**candidate)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail="invalid settings value") from e
+
     # Only a change to a render-affecting setting produces a new panel render
     # worth pushing — so only those should raise the "push to frame?" prompt.
     # Schedule/UI settings (refresh interval, selection mode, quiet hours,
@@ -100,14 +134,16 @@ async def update_settings(
     s.saturation = saturation
     s.contrast = contrast
     s.quiet_hours_enabled = quiet_hours_enabled
-    s.quiet_start = _parse_time(quiet_start)
-    s.quiet_end = _parse_time(quiet_end)
+    s.quiet_start = quiet_start_t
+    s.quiet_end = quiet_end_t
     s.metrics_refresh_seconds = metrics_refresh_seconds
     s.cache_max_bytes = cache_max_bytes
     # The live Cache holds its own copy of the cap; update it and enforce a
-    # lowered limit immediately rather than waiting for the next write.
+    # lowered limit immediately rather than waiting for the next write. Eviction
+    # walks the whole cache tree (slow on the SD card), so run it off the event
+    # loop to avoid stalling other requests and the scheduler.
     state.cache.max_bytes = cache_max_bytes
-    state.cache.evict_if_needed()
+    await asyncio.get_running_loop().run_in_executor(None, state.cache.evict_if_needed)
 
     for k, v in {
         "orientation": str(orientation),

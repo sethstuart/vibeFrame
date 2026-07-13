@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 
@@ -40,6 +40,18 @@ def build_engine(db_path: Path):
     engine = create_engine(
         f"sqlite:///{db_path}", connect_args={"check_same_thread": False}
     )
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_conn, _record):
+        # The engine is shared across the event loop, the scheduler executor,
+        # the thumb-warmer, and the watcher threads. WAL lets readers proceed
+        # during a write; busy_timeout makes a concurrent writer wait for the
+        # lock instead of immediately raising 'database is locked'.
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.close()
+
     SQLModel.metadata.create_all(engine)
     _apply_migrations(engine)
     return engine

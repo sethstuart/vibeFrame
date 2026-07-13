@@ -25,6 +25,17 @@ except Exception:  # pragma: no cover - environment-dependent
 DISPLAY_W = 800
 DISPLAY_H = 480
 
+
+def configure_pillow(max_image_pixels: int) -> None:
+    """Harden Pillow against decompression-bomb inputs. Sets the pixel ceiling
+    and promotes Pillow's DecompressionBombWarning to a hard error so any source
+    above the limit raises at decode time instead of being decoded (which, for a
+    large non-JPEG, would exhaust the Pi's memory). Call once at startup."""
+    import warnings
+
+    Image.MAX_IMAGE_PIXELS = max_image_pixels
+    warnings.simplefilter("error", Image.DecompressionBombWarning)
+
 # Bumped when the prepared-cache image format/contents change. The prepared
 # cache holds the image post-EXIF-transpose and post-crop (RGB at panel
 # resolution) so settings adjustments that don't touch crop/orientation can
@@ -175,6 +186,17 @@ def process(
         _advance(tracker, "decode")
         with timed("pipeline.image.open"):
             with Image.open(path) as img:
+                # Decode JPEGs at a reduced scale when the source dwarfs the
+                # panel. We only need ~target resolution after the crop, so
+                # decoding a 12 MP photo at full res then discarding ~95% of it
+                # is the biggest avoidable cost. draft() picks the largest
+                # libjpeg 1/2..1/8 downscale that still leaves both dimensions
+                # >= the hint, so the crop never upscales; it is a no-op for
+                # non-JPEG inputs. The square hint keeps enough pixels for
+                # either panel orientation, and the smaller image also speeds
+                # up exif_transpose and the saliency crop.
+                hint = max(target_w, target_h)
+                img.draft("RGB", (hint, hint))
                 img.load()
             _advance(tracker, "exif")
             with timed("pipeline.exif.transpose"):
@@ -184,11 +206,15 @@ def process(
         with timed(f"pipeline.crop.{settings.crop_mode}"):
             cropped = crop.crop_to(oriented, target_w, target_h, settings.crop_mode)
         # Write the prepared cache so subsequent renders (settings tweaks)
-        # skip straight to tonemap.
+        # skip straight to tonemap. Cache filenames are always .png by CacheKey
+        # convention, but we store this intermediate as JPEG: it roughly halves
+        # the encode time and shrinks the file ~6x vs RGB PNG (a real win on the
+        # slow SD card), and the result is dithered down to 6 colours next so
+        # the recompression is invisible. Image.open content-sniffs on read.
         if cache is not None and prep_key is not None:
             with timed("pipeline.prepared.write"):
                 buf = BytesIO()
-                cropped.save(buf, format="PNG")
+                cropped.save(buf, format="JPEG", quality=90)
                 cache.put_bytes(prep_key, buf.getvalue())
 
     _advance(tracker, "tonemap")

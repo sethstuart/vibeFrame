@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import logging.handlers
 import signal
 import sys
+from pathlib import Path
 
 import uvicorn
 
@@ -14,6 +16,7 @@ from vibeframe.db import build_engine, get_setting
 from vibeframe.display import build_driver
 from vibeframe.library import ImageLibrary
 from vibeframe.processor import dither as dither_mod
+from vibeframe.processor import pipeline as pipeline_mod
 from vibeframe.progress import RenderTracker
 from vibeframe.scheduler import Scheduler
 from vibeframe.thumb_warmer import ThumbWarmer
@@ -60,20 +63,31 @@ def _restore_persisted_settings(settings: Settings, engine) -> None:
             log.warning("ignoring bad persisted setting %s=%r: %s", name, raw, e)
 
 
-def _setup_logging(level: str) -> None:
+def _setup_logging(level: str, log_path: Path) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_path,
+        maxBytes=5 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[logging.StreamHandler(), file_handler],
     )
 
 
 async def _serve() -> None:
     settings = get_settings()
-    _setup_logging(settings.log_level)
+    _setup_logging(settings.log_level, settings.log_path)
     settings.ensure_dirs()
 
     engine = build_engine(settings.db_path)
     _restore_persisted_settings(settings, engine)
+    # Reject decompression-bomb images before any decode (scan, thumb warm, or
+    # a render) can exhaust memory on the 4 GB Pi.
+    pipeline_mod.configure_pillow(settings.max_image_pixels)
     # Pre-compile numba-JIT'd dither inner loops while the rest of the app is
     # still booting. Subsequent process starts hit the on-disk cache (~10 ms).
     dither_mod.prewarm()
