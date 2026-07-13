@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from dataclasses import dataclass
 
 from fastapi import Header, HTTPException, Request
@@ -32,5 +33,5 @@ def require_token(request: Request, x_vibeframe_token: str | None = Header(defau
     expected = state.settings.web_token
     if not expected:
         return
-    if x_vibeframe_token != expected:
+    if not hmac.compare_digest(x_vibeframe_token or "", expected):
         raise HTTPException(status_code=401, detail="invalid or missing token")

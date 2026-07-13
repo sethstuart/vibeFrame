@@ -165,18 +165,30 @@ def show_now(image_id: int, state: AppState = Depends(get_state)):
     return {"queued": image_id}
 
 
+def _parse_ids(payload: dict) -> list[int]:
+    """Coerce the JSON `ids` field to a list of ints, returning 422 (not 500)
+    on a malformed body."""
+    ids = payload.get("ids") or []
+    if not isinstance(ids, list):
+        raise HTTPException(status_code=422, detail="ids must be a list")
+    try:
+        return [int(i) for i in ids]
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=422, detail="ids must be integers") from e
+
+
 @router.post("/bulk/favorite", dependencies=[Depends(require_token)])
 def bulk_favorite(payload: dict, state: AppState = Depends(get_state)):
-    ids = payload.get("ids") or []
+    ids = _parse_ids(payload)
     favorited = bool(payload.get("favorited", True))
-    n = state.library.bulk_favorite([int(i) for i in ids], favorited)
+    n = state.library.bulk_favorite(ids, favorited)
     return {"changed": n}
 
 
 @router.post("/bulk/delete", dependencies=[Depends(require_token)])
 def bulk_delete(payload: dict, state: AppState = Depends(get_state)):
-    ids = payload.get("ids") or []
-    n = state.library.bulk_delete([int(i) for i in ids])
+    ids = _parse_ids(payload)
+    n = state.library.bulk_delete(ids)
     return {"deleted": n}
 
 
@@ -253,6 +265,12 @@ def source_cropped(image_id: int, state: AppState = Depends(get_state)):
     target_w, target_h = _target_size(state.settings.orientation)
     with timed("source_cropped"):
         with PILImage.open(img.path) as raw:
+            # Decode large JPEGs at a reduced scale — same rationale as the
+            # render pipeline. The hero only displays at panel size, so a full
+            # 12 MP decode is wasted. draft() never upscales and no-ops on
+            # non-JPEG, so the crop still has ample resolution to downscale from.
+            hint = max(target_w, target_h)
+            raw.draft("RGB", (hint, hint))
             oriented = ImageOps.exif_transpose(raw).convert("RGB")
         cropped = crop_mod.crop_to(
             oriented, target_w, target_h, state.settings.crop_mode
