@@ -32,3 +32,6 @@ state/
 cache/
 mock/
 rendered-preview.png
+
+# Opencode workspace
+.opencode/
