@@ -44,7 +44,7 @@ the JIT path.
 One command does everything and exits non-zero on failure:
 
 ```bash
-./.venv/Scripts/python.exe .claude/skills/run-vibeframe/driver.py smoke --allow-js-errors
+./.venv/Scripts/python.exe .claude/skills/run-vibeframe/driver.py smoke
 ```
 
 Expected tail:
@@ -59,8 +59,9 @@ Selection is `shuffle`, so the ink count varies run to run (`5/6` is normal) and
 image named in `rendered+shown:` changes. The assertion is that every colour is *in* the
 palette, not that all six appear.
 
-Drop `--allow-js-errors` to enforce a zero-JS-error page; see Gotchas for the one
-known pre-existing failure that makes strict mode exit 1 today.
+A page JS error fails the run. `--allow-js-errors` downgrades that to a warning if you
+need to get past an unrelated console error while debugging something else — but the
+default is strict, and it should stay that way.
 
 | command | what it does |
 |---|---|
@@ -132,13 +133,15 @@ CI runs only these two. Note `CLAUDE.md` says "36 tests" — it is stale; the su
   inside that window the scheduler skips *every* refresh — no frames, no errors, looks
   like a hang. The driver always sets `VIBEFRAME_QUIET_HOURS_ENABLED=false` and asserts
   `in_quiet == false` in `/system/status`. Set it yourself for any manual run.
-- **Known JS error: `Uncaught ReferenceError: $dispatch is not defined`** (pre-existing,
-  not caused by the driver). `home.html:37,41` use `hx-on::before-request="$dispatch(...)"`,
-  but `hx-on` is evaluated by **HTMX** as plain JS while `$dispatch` is an **Alpine**
-  magic that only exists inside Alpine expressions. Compounding it, the listener is on
-  the sibling `.hero` section (`home.html:118`), which a bubbling event would never reach
-  anyway. Effect: the processing spinner never appears during a refresh — ~38 s of no
-  feedback on real hardware. `smoke` without `--allow-js-errors` fails on exactly this.
+- **Alpine magics are not in scope inside `hx-on::*` handlers.** This repo puts HTMX and
+  Alpine on the same elements, and `hx-on` bodies are evaluated by HTMX as ordinary JS —
+  `$dispatch`, `$refs` and `$el` are all undefined there. `home.html` shipped exactly this
+  bug (`hx-on::before-request="$dispatch('refresh-start')"`), which threw a
+  `ReferenceError` and left the processing spinner dead for the whole ~38 s panel write on
+  real hardware. It now uses `window.dispatchEvent(new CustomEvent(...))` with a matching
+  `window.addEventListener`, which also fixes the second half of the bug: the listener
+  lives on `.hero`, a *sibling* of the `.action-bar` buttons, so a bubbling event from
+  them could never have reached it even if `$dispatch` had worked.
 - **The panel frame is the real assertion.** `dev/state/mock/current.png` must be exactly
   800×480 and contain *only* the 6 Spectra-6 inks. A regression in `palette.py` or
   `dither.py` shows up here and nowhere in the test suite.
@@ -162,9 +165,6 @@ CI runs only these two. Note `CLAUDE.md` says "36 tests" — it is stale; the su
   `loop.add_signal_handler`, which raises `NotImplementedError` on Windows and is
   suppressed — so the app never sees a graceful stop signal. `driver.py down` uses
   `taskkill /F /T` there and `terminate()` elsewhere.
-- **`hx-on` vs Alpine generally** — this repo mixes HTMX and Alpine on the same elements.
-  Alpine magics (`$dispatch`, `$refs`, `$el`) are **not** in scope inside `hx-on::*`
-  handlers. That is the bug above, and it is an easy one to reintroduce.
 
 ## Troubleshooting
 

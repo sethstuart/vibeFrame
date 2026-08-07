@@ -442,6 +442,9 @@ class Browser:
                 "close it and retry"
             )
 
+        # Absolute: Chrome silently fails to bring up the debug port when
+        # --user-data-dir is relative.
+        profile = profile.resolve()
         profile.mkdir(parents=True, exist_ok=True)
         self.proc = subprocess.Popen(
             [

@@ -34,11 +34,11 @@
 
 <section class="action-bar">
   <form hx-post="/system/next" hx-swap="none"
-        hx-on::before-request="$dispatch('refresh-start')">
+        hx-on::before-request="window.dispatchEvent(new CustomEvent('refresh-start'))">
     {{ button('Show next now', variant='primary', icon_name='skip-forward', type='submit') }}
   </form>
   <form hx-post="/system/test-pattern" hx-swap="none"
-        hx-on::before-request="$dispatch('refresh-start')">
+        hx-on::before-request="window.dispatchEvent(new CustomEvent('refresh-start'))">
     {{ button('Show test pattern', variant='secondary', icon_name='zap', type='submit') }}
   </form>
 </section>
@@ -115,7 +115,13 @@
         // Button clicks ("Show next now" / test pattern) put us in the
         // active state immediately so the spinner shows without waiting for
         // the next poll tick.
-        this.$el.addEventListener('refresh-start', () => {
+        //
+        // Listen on window, not this.$el: the buttons live in .action-bar, a
+        // *sibling* of this .hero section, so a bubbling event from them would
+        // never reach $el. The dispatch side is plain DOM rather than Alpine's
+        // $dispatch because hx-on::before-request is evaluated by HTMX as
+        // ordinary JS, where Alpine magics are not in scope.
+        window.addEventListener('refresh-start', () => {
           this.active = true;
           this.pct = 1;
           this.stageLabel = STAGE_LABELS.pick;
