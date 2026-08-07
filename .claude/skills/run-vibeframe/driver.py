@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextlib
 import json
 import os
 import shutil
@@ -65,7 +66,9 @@ def app_env(root: Path, port: int) -> dict:
 
     Quiet hours MUST be off: they default to 22:00-07:00, and inside that window
     the scheduler skips every refresh, so a run after 22:00 local would sit there
-    producing no frames and look like a hang.
+    producing no frames and look like a hang. Note the env var alone is not
+    sufficient -- see clear_persisted_settings(), which the DB can otherwise
+    override at boot.
     """
     env = dict(os.environ)
     env.update(
@@ -77,9 +80,41 @@ def app_env(root: Path, port: int) -> dict:
         VIBEFRAME_QUIET_HOURS_ENABLED="false",
         VIBEFRAME_WEB_PORT=str(port),
         VIBEFRAME_LOG_LEVEL="INFO",
+        # Loopback only. The app's own default is 0.0.0.0 and web_token defaults
+        # to None, so inheriting it would publish an unauthenticated admin
+        # surface (POST /settings, DELETE /images/{id}) to whatever network the
+        # machine is on. Every client in this file talks to 127.0.0.1 anyway.
+        VIBEFRAME_WEB_HOST="127.0.0.1",
+        # The child runs with cwd=REPO, where Settings reads .env. If that .env
+        # carries a deployment token, every write endpoint the driver calls
+        # would 401. Blank it: require_token() returns early on a falsy token.
+        VIBEFRAME_WEB_TOKEN="",
         PYTHONUNBUFFERED="1",
     )
     return env
+
+
+def clear_persisted_settings(root: Path) -> None:
+    """Drop rows from the scratch DB's `setting` table before boot.
+
+    __main__._restore_persisted_settings overlays this table on top of the
+    env-derived Settings, so anyone who has ever hit Save on the settings page
+    against this dev root would otherwise silently override the env above --
+    including re-enabling quiet hours, which stalls the scheduler entirely.
+    Only ever touches the driver's own scratch DB under `root`.
+    """
+    import sqlite3
+
+    db = root / "state" / "vibeframe.db"
+    if not db.exists():
+        return
+    try:
+        with sqlite3.connect(db) as c:
+            n = c.execute("delete from setting").rowcount
+        if n:
+            log(f"cleared {n} persisted setting(s) so env values win")
+    except sqlite3.Error as e:
+        log(f"could not clear persisted settings ({e}); env may be overridden")
 
 
 # --------------------------------------------------------------------------
@@ -138,8 +173,46 @@ def wait_health(port: int, timeout: float = 90.0) -> None:
     die(f"app never became healthy on :{port} (last: {last})")
 
 
+def port_is_serving(port: int) -> bool:
+    import httpx
+
+    try:
+        return httpx.get(f"http://127.0.0.1:{port}/healthz", timeout=2).status_code == 200
+    except Exception:
+        return False
+
+
+def pid_cmdline(pid: int) -> str:
+    """Best-effort command line for a pid, '' if unknown.
+
+    Used to confirm a recorded pid is still *our* app before killing it. The OS
+    recycles pids, and `taskkill /F /T` on a recycled pid would take down an
+    unrelated process and its entire child tree.
+    """
+    try:
+        if os.name == "nt":
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+                capture_output=True, text=True, timeout=20,
+            )
+            return (out.stdout or "").strip()
+        return Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "replace").replace("\0", " ")
+    except Exception:
+        return ""
+
+
 def up(root: Path, port: int, quiet: bool = False) -> subprocess.Popen:
     root.mkdir(parents=True, exist_ok=True)
+
+    # Refuse to start on top of a live instance. Truncating its log and
+    # overwriting its pid record would orphan it holding the port, with no
+    # handle left to stop it.
+    if port_is_serving(port):
+        die(f"something is already serving :{port} -- run 'driver.py down', or use --port")
+
+    clear_persisted_settings(root)
+
     logfile = root / "app.log"
     # Deliberately not a context manager: the handle must outlive this function
     # and stay open for the child's lifetime.
@@ -151,8 +224,6 @@ def up(root: Path, port: int, quiet: bool = False) -> subprocess.Popen:
         stdout=fh,
         stderr=subprocess.STDOUT,
     )
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps({"pid": proc.pid, "port": port}))
     if not quiet:
         log(f"started pid={proc.pid}, log -> {logfile}")
 
@@ -164,19 +235,40 @@ def up(root: Path, port: int, quiet: bool = False) -> subprocess.Popen:
         die(f"app exited immediately (rc={proc.returncode}):\n{tail}")
 
     wait_health(port)
+    # Recorded only once the process is confirmed alive and serving, so a failed
+    # boot can never replace the handle to a working one.
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps({"pid": proc.pid, "port": port, "started_at": time.time()}))
     return proc
 
 
 def down(proc: subprocess.Popen | None = None) -> None:
     pid = None
-    if proc is None and STATE_FILE.exists():
-        pid = json.loads(STATE_FILE.read_text()).get("pid")
-    elif proc is not None:
+    if proc is not None:
         pid = proc.pid
+    elif STATE_FILE.exists():
+        pid = json.loads(STATE_FILE.read_text()).get("pid")
 
     if pid is None:
         log("nothing to stop")
         return
+
+    # A pid we did not spawn in this process must be proven to still be the app
+    # before we force-kill it -- pids get recycled, and nothing clears the state
+    # file across a reboot.
+    if proc is None:
+        cmd = pid_cmdline(pid)
+        if not cmd:
+            log(f"pid {pid} is not running; clearing stale state file")
+            STATE_FILE.unlink(missing_ok=True)
+            return
+        # Match the module invocation, not a bare "vibeframe" substring: the
+        # interpreter itself lives at <repo>/.venv/Scripts/python.exe, so the
+        # repo name appears in the cmdline of *every* process started from this
+        # venv and would wave through an unrelated one.
+        if "-m vibeframe" not in " ".join(cmd.split()).lower():
+            STATE_FILE.unlink(missing_ok=True)
+            die(f"pid {pid} is not vibeframe (cmdline: {cmd[:120]!r}); refusing to kill it")
 
     # Windows has no SIGTERM for this process; __main__ installs signal handlers
     # via loop.add_signal_handler, which raises NotImplementedError there and is
@@ -219,29 +311,44 @@ def check_api(port: int) -> None:
             assert "<html" in r.text.lower(), f"{page} did not return an HTML document"
         log(f"pages OK: {', '.join(PAGES)}")
 
-        # Force a render+show and wait for the scheduler to finish it.
+        # Baseline BEFORE triggering. __main__ starts scheduler.run() at boot and
+        # its first _step() renders immediately, so a bare "done and shown_at is
+        # set" poll is already satisfied by that boot render -- meaning a
+        # /system/next that had regressed to a no-op would still pass.
+        before = c.get("/system/render-status").json().get("refresh", {})
+        baseline_shown = before.get("shown_at")
+
         assert c.post("/system/next").status_code == 200, "POST /system/next failed"
-        deadline = time.time() + 60
+        deadline = time.time() + 90
         while time.time() < deadline:
             st = c.get("/system/render-status").json().get("refresh", {})
             if st.get("failed"):
                 die(f"render failed: {st.get('error')}")
-            if st.get("done") and st.get("shown_at"):
-                log(f"rendered+shown: {st.get('image_path')}")
+            if st.get("done") and st.get("shown_at") and st.get("shown_at") != baseline_shown:
+                log(f"rendered+shown: {st.get('image_path')} (shown_at advanced)")
                 break
             time.sleep(1)
         else:
-            die("render did not complete within 60s")
+            die(
+                "POST /system/next did not produce a NEW show within 90s "
+                f"(shown_at stuck at {baseline_shown!r}) -- the endpoint may be a no-op"
+            )
 
         m = c.get("/metrics.json").json()
         assert "driver.mock.show" in m, "no panel-write metric recorded"
         log(f"panel writes: {m['driver.mock.show']['count']}, last {m['driver.mock.show']['last_ms']:.0f} ms")
 
 
-def check_panel(root: Path) -> None:
+def check_panel(root: Path, newer_than: float | None = None) -> None:
     """The frame the panel would physically display must be exactly 800x480 and
     contain only the six Spectra-6 inks. Anything else means the palette or
-    dither stage regressed."""
+    dither stage regressed.
+
+    `newer_than` is a unix timestamp the frame must post-date. Without it this
+    check happily validates a PNG left in the gitignored dev/ tree by a run days
+    ago -- which is the one way this assertion could report green while the
+    palette it exists to guard is broken.
+    """
     from PIL import Image
 
     from vibeframe.processor.palette import SPECTRA6
@@ -249,6 +356,20 @@ def check_panel(root: Path) -> None:
     cur = root / "state" / "mock" / "current.png"
     if not cur.exists():
         die(f"no panel output at {cur} -- the scheduler never completed a show")
+
+    if newer_than is None and STATE_FILE.exists():
+        # Standalone `panel` run: fall back to the tracked app's start time.
+        with contextlib.suppress(Exception):
+            newer_than = json.loads(STATE_FILE.read_text()).get("started_at")
+
+    age_src = cur.stat().st_mtime
+    if newer_than is None:
+        log("WARNING: cannot verify frame freshness (no running app tracked); it may be stale")
+    elif age_src < newer_than:
+        die(
+            f"panel frame is stale: {cur} was written {newer_than - age_src:.0f}s "
+            "before this run started -- no new frame was produced"
+        )
 
     im = Image.open(cur).convert("RGB")
     if im.size != PANEL_SIZE:
@@ -307,6 +428,19 @@ class Browser:
 
     def launch(self, profile: Path) -> None:
         import httpx
+
+        # A leftover Chrome from a crashed run still answers on this port. Without
+        # this check we would "connect" to it, drive the wrong browser, and
+        # screenshot a stale page while reporting success.
+        port_busy = False
+        with contextlib.suppress(Exception):
+            httpx.get(f"http://127.0.0.1:{self.port}/json/version", timeout=2)
+            port_busy = True
+        if port_busy:
+            die(
+                f"a browser is already on debug port {self.port} (leaked from an earlier run); "
+                "close it and retry"
+            )
 
         profile.mkdir(parents=True, exist_ok=True)
         self.proc = subprocess.Popen(
@@ -370,6 +504,17 @@ class Browser:
             e = msg["params"]["entry"]
             if e.get("level") == "error":
                 self.errors.append(f"{e.get('source')}: {e.get('text')}")
+        elif m == "Runtime.consoleAPICalled":
+            # htmx reports swap/target/status failures through console.error
+            # rather than by throwing, so without this a "Show next now" that
+            # started 500ing would leave the page looking clean.
+            p = msg["params"]
+            if p.get("type") in ("error", "assert"):
+                parts = [
+                    a.get("description") or json.dumps(a.get("value"), default=str)
+                    for a in p.get("args", [])
+                ]
+                self.errors.append("console.error: " + " ".join(x for x in parts if x))
 
     async def goto(self, url: str, settle: float = 2.5) -> None:
         await self.send("Page.navigate", url=url)
@@ -404,10 +549,13 @@ class Browser:
 
 async def _shots(root: Path, port: int) -> list[str]:
     b = Browser()
-    b.launch(root / "chrome-profile")
-    await b.connect()
     out = root / "shots"
+    # launch/connect live INSIDE the try: a failure in connect() (Chrome up but no
+    # page target yet) would otherwise skip close() and leak a headless Chrome
+    # holding the debug port and the profile lock.
     try:
+        b.launch(root / "chrome-profile")
+        await b.connect()
         for page in PAGES:
             await b.goto(f"http://127.0.0.1:{port}{page}")
             name = "home" if page == "/" else page.strip("/").replace("/", "-")
@@ -428,8 +576,20 @@ async def _shots(root: Path, port: int) -> list[str]:
             ".find(x=>/show next/i.test(x.textContent)); if(!b) return false; b.click(); return true; })()"
         )
         assert clicked, "could not find the 'Show next now' button"
-        await asyncio.sleep(8)
-        after = await b.eval("document.querySelector('.hero-caption .when')?.textContent || ''")
+
+        # Poll for the caption to actually advance instead of sleeping a fixed
+        # 8s and merely logging the result -- otherwise a click that silently
+        # does nothing (bad hx-target, endpoint 500ing) still "passes".
+        after = before
+        for _ in range(40):
+            await asyncio.sleep(1)
+            after = await b.eval("document.querySelector('.hero-caption .when')?.textContent || ''")
+            if after and after != before:
+                break
+        assert after != before, (
+            f"clicking 'Show next now' did not change the caption (still {before!r}) "
+            "-- the HTMX post or its swap is broken"
+        )
         log(f"clicked 'Show next now': caption {before!r} -> {after!r}")
         await b.shot(out / "home-after-next.png")
         return b.errors
@@ -513,10 +673,13 @@ def main() -> int:
         render_one(Path(a.arg), root / "shots" / "render.png")
     elif a.cmd == "smoke":
         seed(root)
+        started = time.time()
         proc = up(root, a.port)
         try:
             check_api(a.port)
-            check_panel(root)
+            # Every frame this run produces must post-date `started`, so a PNG
+            # left in dev/ by an earlier run cannot satisfy the palette check.
+            check_panel(root, newer_than=started)
             shots(root, a.port, a.allow_js_errors)
         finally:
             if not a.keep:

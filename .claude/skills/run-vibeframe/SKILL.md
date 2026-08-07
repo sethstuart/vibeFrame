@@ -65,12 +65,19 @@ known pre-existing failure that makes strict mode exit 1 today.
 | command | what it does |
 |---|---|
 | `smoke` | seed → up → api → panel → shots → down. The one to run. `--keep` leaves it running |
-| `up` / `down` | boot and leave serving on :8099 / stop it |
+| `up` / `down` | boot and leave serving on :8099 / stop it. `up` refuses if the port is already serving; `down` refuses to kill a pid whose cmdline isn't `-m vibeframe` |
 | `seed` | write 4 synthetic photos (landscape/portrait/square/wide) into `dev/photos` |
-| `api` | assert `/healthz`, all 4 pages, force a render via `POST /system/next`, wait for it |
-| `panel` | assert `dev/state/mock/current.png` is exactly 800×480 and uses only Spectra-6 inks |
-| `shots` | screenshot all 4 pages, assert Alpine initialised, click "Show next now", collect JS errors |
+| `api` | assert `/healthz`, all 4 pages, then force a render and require `shown_at` to *advance* |
+| `panel` | assert `dev/state/mock/current.png` is exactly 800×480, uses only Spectra-6 inks, and post-dates this run |
+| `shots` | screenshot all 4 pages, assert Alpine initialised, click "Show next now" and require the caption to change, collect JS errors |
 | `render <img>` | run one image through the pipeline — no server, no DB, no scheduler |
+
+Every assertion is written to fail rather than pass vacuously: the render check
+baselines `shown_at` *before* posting (the boot render would otherwise satisfy
+it), and `panel` compares the PNG's mtime against the run's start (`dev/` is
+gitignored and never auto-cleaned, so a week-old frame would otherwise pass).
+Run `panel` standalone with nothing tracked and it warns that it cannot verify
+freshness rather than quietly asserting on a stale file.
 
 Artifacts (all under the gitignored `dev/`):
 
@@ -140,7 +147,17 @@ CI runs only these two. Note `CLAUDE.md` says "36 tests" — it is stale; the su
   the pipeline result; assert it on the mock driver's output.
 - **`Settings()` reads `.env` from the CWD.** A `.env` left in the repo silently overrides
   defaults. Env vars still win over it, but `driver.py render` passes `_env_file=None` to
-  ignore it entirely.
+  ignore it entirely. The driver also forces `VIBEFRAME_WEB_TOKEN=""` for the child,
+  because a token in that `.env` would 401 the driver's own `POST /system/next`
+  (`require_token` returns early only when the token is falsy).
+- **Env vars are not the last word on settings.** `__main__._restore_persisted_settings`
+  overlays the DB's `setting` table on top of the env at boot, so anyone who has hit Save
+  on the settings page against this dev root can silently re-enable quiet hours or change
+  the dither — and no env var fixes it. `up()` clears that table in its own scratch DB
+  before launching; if you boot the app by hand, delete `dev/state/vibeframe.db` instead.
+- **The driver binds the app to `127.0.0.1`.** The app's own default is `0.0.0.0` with no
+  token, which would expose `POST /settings` and `DELETE /images/{id}` to the whole LAN
+  for the lifetime of a `smoke --keep`.
 - **Windows has no `SIGTERM` for this process.** `__main__` installs handlers via
   `loop.add_signal_handler`, which raises `NotImplementedError` on Windows and is
   suppressed — so the app never sees a graceful stop signal. `driver.py down` uses

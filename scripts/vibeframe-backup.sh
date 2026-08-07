@@ -15,8 +15,15 @@
 #   VIBEFRAME_BACKUP_KEEP=30 ./vibeframe-backup.sh
 set -euo pipefail
 
-DEST="${VIBEFRAME_BACKUP_DIR:-/mnt/vibeFrame/.vibeframe-backup}"
+# The archive contains .env (which may hold VIBEFRAME_WEB_TOKEN) and the whole
+# database. It lands on a share every host on the LAN can mount, so nothing this
+# script creates may be group- or world-readable.
+umask 077
+
 MOUNT="${VIBEFRAME_MOUNT:-/mnt/vibeFrame}"
+# Derived from MOUNT, not independent: the mountpoint guard below must validate
+# the same path we actually write to, or it guards nothing.
+DEST="${VIBEFRAME_BACKUP_DIR:-$MOUNT/.vibeframe-backup}"
 KEEP="${VIBEFRAME_BACKUP_KEEP:-14}"
 REPO="${VIBEFRAME_REPO:-$HOME/Documents/github/vibeFrame}"
 CONTAINER="${VIBEFRAME_CONTAINER:-vibeframe}"
@@ -26,6 +33,13 @@ log() { printf '[vibeframe-backup] %s\n' "$*"; }
 die() { printf '[vibeframe-backup] FAIL: %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -ne 0 ] || die "run as your normal user, not root (NFS root_squash would make this backup unreadable and undeletable)"
+
+# KEEP=0 would make `tail -n +1` list every archive and delete the snapshot we
+# just wrote; a non-numeric value would abort mid-run under set -u.
+case "$KEEP" in
+  '' | *[!0-9]*) die "VIBEFRAME_BACKUP_KEEP must be a whole number, got '$KEEP'" ;;
+esac
+[ "$KEEP" -ge 1 ] || die "VIBEFRAME_BACKUP_KEEP must be >= 1, got '$KEEP' (0 would delete every snapshot including the new one)"
 
 # Writing into an unmounted mountpoint would silently fill the SD card with
 # files that vanish the moment NFS mounts over them.
@@ -63,10 +77,23 @@ PY
 )"
 docker cp "$CONTAINER:/tmp/vibeframe-backup.db" "$STAGE/vibeframe.db" >/dev/null
 docker exec "$CONTAINER" rm -f /tmp/vibeframe-backup.db
+chmod 600 "$STAGE/vibeframe.db"
 log "db captured: $COUNTS"
 
 # --- host + app config ----------------------------------------------------
-copy() { [ -e "$1" ] && cp "$1" "$2" && log "captured $1" || log "skipped $1 (absent)"; }
+# An absent file is fine and expected (the systemd units do not exist on a first
+# run). A file that exists but cannot be copied is a real failure and must not be
+# reported as "absent" -- that is how a backup silently ships without its .env.
+copy() {
+  local src=$1 dst=$2
+  if [ ! -e "$src" ]; then
+    log "skipped $src (absent)"
+    return 0
+  fi
+  cp "$src" "$dst" || die "$src exists but could not be copied (permissions? full disk?)"
+  chmod 600 "$dst"
+  log "captured $src"
+}
 
 copy "$REPO/.env"                                                    "$STAGE/app/.env"
 copy /etc/fstab                                                      "$STAGE/etc/fstab"
@@ -106,35 +133,80 @@ bind-mounts an empty directory and keeps it (docker bind mounts are rprivate).
        sudo raspi-config nonint do_spi 0
        sudo raspi-config nonint do_i2c 0
        echo 'dtoverlay=spi0-0cs' | sudo tee -a /boot/firmware/config.txt
+       sudo reboot
 
-2. Install docker + nfs-common, add yourself to the docker group, re-login.
+2. Install docker + nfs-common, add yourself to the docker group, then log out
+   and back in (group membership is fixed at login).
 
-3. Restore `etc/fstab`'s vibeFrame line and `etc/docker-wait-for-nfs.conf`
-   (to /etc/systemd/system/docker.service.d/), then:
+3. Restore the vibeFrame line from `etc/fstab` and copy
+   `etc/docker-wait-for-nfs.conf` to
+   /etc/systemd/system/docker.service.d/, then:
 
        sudo systemctl daemon-reload && sudo mount -a
 
-4. Clone the repo at the commit in MANIFEST.txt, drop `app/.env` in place.
+4. Clone the repo at the commit in MANIFEST.txt and put `app/.env` back:
 
-5. Restore the database BEFORE first start, so the app doesn't create an empty
-   one. Copy `vibeframe.db` into the state volume as uid 1000, e.g. start the
-   stack once, `docker compose stop`, then:
+       install -m 600 app/.env <repo>/.env
 
-       docker cp vibeframe.db vibeframe:/var/lib/vibeframe/vibeframe.db
-       docker compose restart
+5. Start the stack once so the volume and schema exist, then stop the app and
+   replace the database:
 
-   Delete any stale `vibeframe.db-wal` / `-shm` beside it -- a WAL from a
-   different database will be rejected or replay the wrong data.
+       docker compose up -d --build
+       docker compose stop
 
-6. `docker compose up -d --build`, then verify the row counts in MANIFEST.txt
-   match: favourites and history are the whole point of this backup.
+   `docker cp` writes as root:root unless -a is passed, but the app runs as
+   USER vibeframe (uid 1000) -- a root-owned DB opens read-only and the
+   scheduler dies on its first write with "attempt to write a readonly
+   database", leaving the frame stuck on one photo. Copy with -a and then fix
+   ownership explicitly:
+
+       docker cp -a vibeframe.db vibeframe:/var/lib/vibeframe/vibeframe.db
+       docker exec -u 0 vibeframe chown vibeframe:vibeframe /var/lib/vibeframe/vibeframe.db
+
+   Delete any stale WAL beside it. The backup is already checkpointed, so a
+   leftover -wal/-shm from the old database would replay the wrong data:
+
+       docker exec -u 0 vibeframe rm -f /var/lib/vibeframe/vibeframe.db-wal \
+                                        /var/lib/vibeframe/vibeframe.db-shm
+
+       docker compose start
+
+6. Reinstall the backup timer (it is not restored by any of the above):
+
+       sudo install -m 755 vibeframe-backup.sh /usr/local/bin/vibeframe-backup
+       sudo install -m 644 etc/vibeframe-backup.service etc/vibeframe-backup.timer \
+            /etc/systemd/system/
+       sudo systemctl daemon-reload
+       sudo systemctl enable --now vibeframe-backup.timer
+
+7. Verify the row counts in MANIFEST.txt match -- favourites and history are the
+   whole point of this backup:
+
+       docker exec vibeframe python3 -c "import sqlite3;c=sqlite3.connect('/var/lib/vibeframe/vibeframe.db');print({t:c.execute('select count(*) from '+t).fetchone()[0] for t in ('image','favorite','history','setting')})"
 EOF
+chmod 600 "$STAGE/MANIFEST.txt" "$STAGE/RESTORE.md"
 
 # --- write + rotate -------------------------------------------------------
 mkdir -p "$DEST"
+chmod 700 "$DEST" 2>/dev/null || true
+
+# Clear any temp left by a previous interrupted run.
+rm -f "$DEST"/.tmp-vibeframe-backup-*.tar.gz
+
+# Write to a temp name and rename into place. A rename within one filesystem is
+# atomic, so an interrupted run can never leave a truncated archive that the
+# rotation glob would count as a valid snapshot, nor destroy the previous
+# latest.tar.gz.
 ARCHIVE="$DEST/vibeframe-backup-$STAMP.tar.gz"
-tar -czf "$ARCHIVE" -C "$WORK" "vibeframe-backup-$STAMP"
-cp -f "$ARCHIVE" "$DEST/latest.tar.gz"
+TMP_ARCHIVE="$DEST/.tmp-vibeframe-backup-$STAMP.tar.gz"
+tar -czf "$TMP_ARCHIVE" -C "$WORK" "vibeframe-backup-$STAMP"
+tar -tzf "$TMP_ARCHIVE" >/dev/null || die "archive failed verification immediately after writing"
+chmod 600 "$TMP_ARCHIVE"
+mv -f "$TMP_ARCHIVE" "$ARCHIVE"
+
+TMP_LATEST="$DEST/.tmp-vibeframe-backup-latest.tar.gz"
+cp -f "$ARCHIVE" "$TMP_LATEST"
+mv -f "$TMP_LATEST" "$DEST/latest.tar.gz"
 log "wrote $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
 
 mapfile -t OLD < <(ls -1t "$DEST"/vibeframe-backup-*.tar.gz 2>/dev/null | tail -n +$((KEEP + 1)))
