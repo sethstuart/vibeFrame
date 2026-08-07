@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from time import perf_counter
 
@@ -16,10 +19,28 @@ STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
+def _version() -> str:
+    try:
+        return _pkg_version("vibeframe")
+    except PackageNotFoundError:  # running from a source tree, not installed
+        return "0.0.0"
+
+
+APP_VERSION = _version()
+# Short git sha, baked in as a build arg by docker-compose. Empty when the app
+# is run straight from a checkout (.dockerignore excludes .git, so the image has
+# no repo to read it from at runtime) -- the footer just omits it then.
+APP_BUILD = os.environ.get("VIBEFRAME_BUILD", "").strip()
+
+
 def create_app(state: AppState) -> FastAPI:
     app = FastAPI(title="vibeFrame", version="0.1.0")
     app.state.app_state = state
     app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # Available to every template (the footer in base.html) without each route
+    # having to pass them through its context.
+    app.state.templates.env.globals["app_version"] = APP_VERSION
+    app.state.templates.env.globals["app_build"] = APP_BUILD
 
     @app.middleware("http")
     async def timing_middleware(request: Request, call_next):

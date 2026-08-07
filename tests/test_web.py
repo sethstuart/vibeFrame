@@ -152,6 +152,7 @@ def test_settings_push_prompt_only_on_render_change(tmp_settings):
         "quiet_end": "07:00",
         "metrics_refresh_seconds": 10,
         "cache_max_mb": 500,
+        "backup_keep": 5,
     }
 
     async def run():
@@ -168,6 +169,52 @@ def test_settings_push_prompt_only_on_render_change(tmp_settings):
             r = await client.post("/settings", data={**base, "saturation": 2.0})
             assert r.status_code == 303, r.text
             assert "pushable=1" in r.headers["location"]
+
+    asyncio.run(run())
+
+
+def test_backup_keep_persists_under_its_documented_key(tmp_settings):
+    """scripts/vibeframe-backup.sh reads this value straight out of the DB with
+    `select value from setting where key = 'backup_keep'`, so the key name and
+    the string encoding are a contract with a shell script that no other test
+    would catch breaking."""
+    from vibeframe.db import get_setting
+
+    tmp_settings.ensure_dirs()
+    app, _ = _setup(tmp_settings)
+    engine = app.state.app_state.engine
+
+    base = {
+        "orientation": 270,
+        "refresh_minutes": 30,
+        "selection_mode": "shuffle",
+        "dither": "floyd-steinberg",
+        "crop_mode": "smart",
+        "saturation": 1.15,
+        "contrast": 1.05,
+        "quiet_hours_enabled": "true",
+        "quiet_start": "22:00",
+        "quiet_end": "07:00",
+        "metrics_refresh_seconds": 10,
+        "cache_max_mb": 500,
+        "backup_keep": 5,
+    }
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test", follow_redirects=False
+        ) as client:
+            r = await client.post("/settings", data={**base, "backup_keep": 9})
+            assert r.status_code == 303, r.text
+            assert get_setting(engine, "backup_keep") == "9"
+            assert tmp_settings.backup_keep == 9
+
+            # Rotation with 0 would delete every snapshot including the new one,
+            # so the floor is enforced server-side, not just in the shell script.
+            r = await client.post("/settings", data={**base, "backup_keep": 0})
+            assert r.status_code == 422, r.text
+            assert get_setting(engine, "backup_keep") == "9"
 
     asyncio.run(run())
 

@@ -12,7 +12,7 @@
 # deleted by the rotation pass, and the backup dir would grow forever.
 #
 #   ./vibeframe-backup.sh              # write a snapshot, rotate old ones
-#   VIBEFRAME_BACKUP_KEEP=30 ./vibeframe-backup.sh
+#   VIBEFRAME_BACKUP_KEEP=30 ./vibeframe-backup.sh   # one-off override
 set -euo pipefail
 
 # The archive contains .env (which may hold VIBEFRAME_WEB_TOKEN) and the whole
@@ -24,7 +24,6 @@ MOUNT="${VIBEFRAME_MOUNT:-/mnt/vibeFrame}"
 # Derived from MOUNT, not independent: the mountpoint guard below must validate
 # the same path we actually write to, or it guards nothing.
 DEST="${VIBEFRAME_BACKUP_DIR:-$MOUNT/.vibeframe-backup}"
-KEEP="${VIBEFRAME_BACKUP_KEEP:-14}"
 REPO="${VIBEFRAME_REPO:-$HOME/Documents/github/vibeFrame}"
 CONTAINER="${VIBEFRAME_CONTAINER:-vibeframe}"
 DB_IN_CONTAINER=/var/lib/vibeframe/vibeframe.db
@@ -34,18 +33,45 @@ die() { printf '[vibeframe-backup] FAIL: %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -ne 0 ] || die "run as your normal user, not root (NFS root_squash would make this backup unreadable and undeletable)"
 
-# KEEP=0 would make `tail -n +1` list every archive and delete the snapshot we
-# just wrote; a non-numeric value would abort mid-run under set -u.
-case "$KEEP" in
-  '' | *[!0-9]*) die "VIBEFRAME_BACKUP_KEEP must be a whole number, got '$KEEP'" ;;
-esac
-[ "$KEEP" -ge 1 ] || die "VIBEFRAME_BACKUP_KEEP must be >= 1, got '$KEEP' (0 would delete every snapshot including the new one)"
-
 # Writing into an unmounted mountpoint would silently fill the SD card with
 # files that vanish the moment NFS mounts over them.
 mountpoint -q "$MOUNT" || die "$MOUNT is not mounted; refusing to write into the bare mountpoint"
 
 docker inspect "$CONTAINER" >/dev/null 2>&1 || die "container '$CONTAINER' not found (is the stack up?)"
+
+# How many snapshots to keep. The number is owned by the app's Settings page so
+# there is one visible place to change it; this reads it back out of the same
+# `setting` table the web UI writes. An explicit env var still wins, for one-off
+# runs and for the tests that prove the validation below actually fires.
+KEEP="${VIBEFRAME_BACKUP_KEEP:-}"
+KEEP_SOURCE="VIBEFRAME_BACKUP_KEEP"
+if [ -z "$KEEP" ]; then
+  KEEP="$(docker exec -i "$CONTAINER" python3 - <<'PY' 2>/dev/null | tr -d '[:space:]'
+import sqlite3
+try:
+    c = sqlite3.connect("/var/lib/vibeframe/vibeframe.db")
+    row = c.execute('select value from setting where "key" = ?', ("backup_keep",)).fetchone()
+    print(row[0] if row else "")
+except Exception:
+    print("")
+PY
+)"
+  KEEP_SOURCE="Settings page"
+fi
+if [ -z "$KEEP" ]; then
+  # Matches Settings.backup_keep's default; only reached before the user has
+  # ever saved settings.
+  KEEP=5
+  KEEP_SOURCE="built-in default"
+fi
+
+# KEEP=0 would make `tail -n +1` list every archive and delete the snapshot we
+# just wrote; a non-numeric value would abort mid-run under set -u.
+case "$KEEP" in
+  '' | *[!0-9]*) die "backup retention must be a whole number, got '$KEEP' (from $KEEP_SOURCE)" ;;
+esac
+[ "$KEEP" -ge 1 ] || die "backup retention must be >= 1, got '$KEEP' (from $KEEP_SOURCE); 0 would delete every snapshot including the new one"
+log "keeping $KEEP snapshot(s) (from $KEEP_SOURCE)"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 WORK="$(mktemp -d)"

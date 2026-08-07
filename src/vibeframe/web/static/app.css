@@ -127,8 +127,8 @@ main.app-main.fit-viewport {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  height: calc(100vh - var(--header-height));
-  max-height: calc(100vh - var(--header-height));
+  height: calc(100vh - var(--header-height) - var(--footer-height));
+  max-height: calc(100vh - var(--header-height) - var(--footer-height));
   overflow: hidden;          /* hard guarantee */
   padding: var(--space-4) var(--space-6);
 }
@@ -170,6 +170,20 @@ main.app-main.fit-viewport > .hero {
 }
 
 /* Mobile bottom nav */
+/* Version strip. Deliberately quiet — it is provenance, not navigation. */
+footer.app-footer {
+  height: var(--footer-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: var(--border-hair) solid var(--border-subtle);
+  background: var(--surface-page);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-wide);
+}
+
 nav.mobile-nav {
   display: none;
   position: fixed;
@@ -188,6 +202,8 @@ nav.mobile-nav a {
 nav.mobile-nav a.active { color: var(--accent); }
 nav.mobile-nav svg { width: 22px; height: 22px; }
 @media (max-width: 720px) { nav.mobile-nav { display: block; } }
+/* The bottom nav is fixed, so the footer needs to clear it or it sits underneath. */
+@media (max-width: 720px) { footer.app-footer { margin-bottom: 64px; } }
 
 /* ──────────────────────────────────────── primitives ─── */
 .stack { display: flex; flex-direction: column; }

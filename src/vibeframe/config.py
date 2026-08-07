@@ -51,6 +51,12 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
     cache_max_bytes: int = Field(default=500 * 1024 * 1024, ge=1024 * 1024)
+    # How many dated snapshots scripts/vibeframe-backup.sh keeps on the NAS.
+    # The app never runs a backup itself -- it only owns this number so it can
+    # be edited from Settings; the host-side script reads it back out of the
+    # `setting` table. Floor of 1: rotation with 0 would delete every snapshot,
+    # including the one just written.
+    backup_keep: int = Field(default=5, ge=1, le=365)
     # Hard ceiling on decoded image size. Any source above this many pixels is
     # rejected rather than decoded, so a malicious/huge upload can't exhaust the
     # Pi's memory. Generous enough for large phone photos (48-108 MP); JPEGs are
