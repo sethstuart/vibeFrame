@@ -1,0 +1,4 @@
+# This repo is edited on Windows (core.autocrlf=true) and deployed to a Pi.
+# Shell scripts must keep LF: a CRLF shebang becomes "#!/usr/bin/env bash\r",
+# which Linux reports as "bad interpreter: No such file or directory".
+*.sh text eol=lf

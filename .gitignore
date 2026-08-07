@@ -20,12 +20,16 @@ htmlcov/
 # Editors
 .vscode/
 .idea/
+# Per-machine Claude Code permissions; the skills alongside it are shared.
+.claude/settings.local.json
 *.swp
 .DS_Store
 
 # App runtime artifacts
 .env
 .env.local
+# Scratch root for the run-vibeframe driver (seeded photos, state, shots).
+dev/
 *.db
 *.db-journal
 state/
