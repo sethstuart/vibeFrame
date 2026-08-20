@@ -157,9 +157,12 @@ def process(
         with timed("pipeline.cache.lookup"):
             cached = cache.get(key)
         if cached is not None:
-            result = ProcessedImage(
-                path=path, image=Image.open(cached), source_sha256=source_key
-            )
+            image = Image.open(cached)
+            # Materialise now (matching the prepared-cache path below): this
+            # entry can be evicted by a concurrent render before the caller
+            # reads it, and we'd rather fail here than mid-driver-write.
+            image.load()
+            result = ProcessedImage(path=path, image=image, source_sha256=source_key)
             record("pipeline.process.hit", perf_counter() - start)
             if tracker is not None:
                 tracker.mark_rendered()

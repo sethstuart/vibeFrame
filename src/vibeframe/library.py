@@ -143,6 +143,19 @@ class ImageLibrary:
     def count(self, favorites_only: bool = False) -> int:
         return image_count(self.engine, favorites_only=favorites_only)
 
+    def safe_path(self, raw: str | Path) -> Path | None:
+        """Resolve `raw` and return it only if the target stays inside the
+        library root. Returns None when a DB row (or symlink) points outside —
+        callers treat that as "not found" so nothing outside photos_dir is ever
+        read or deleted through a stored record."""
+        try:
+            resolved = Path(raw).resolve()
+        except OSError:
+            return None
+        if not resolved.is_relative_to(self.root.resolve()):
+            return None
+        return resolved
+
     def remove_path(self, path: Path) -> None:
         with self._lock:
             sha = delete_image_by_path(self.engine, str(path))
@@ -197,8 +210,15 @@ class ImageLibrary:
             img = self.get(image_id)
             if img is None:
                 continue
+            target = self.safe_path(img.path)
+            if target is None:
+                log.warning(
+                    "bulk_delete: skipping id %s — path resolves outside library root",
+                    image_id,
+                )
+                continue
             with contextlib.suppress(OSError):
-                _P(img.path).unlink(missing_ok=True)
+                _P(target).unlink(missing_ok=True)
             self.remove_path(_P(img.path))
             n += 1
         return n

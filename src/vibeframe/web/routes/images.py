@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import contextlib
 import io
-import shutil
+import logging
 import time
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
 
-from vibeframe.library import IMAGE_EXTS
+from vibeframe.library import IMAGE_EXTS, LibraryImage
 from vibeframe.processor.pipeline import cached_png_bytes, process
 from vibeframe.thumb_warmer import generate_thumb, thumb_cache_path
 from vibeframe.timing import timed
@@ -17,6 +19,8 @@ from vibeframe.web.deps import AppState, get_state, require_token
 THUMB_CACHE_HEADERS = {"Cache-Control": "public, max-age=86400"}
 
 router = APIRouter(prefix="/images", tags=["images"])
+
+log = logging.getLogger("vibeframe")
 
 
 PAGE_SIZE_DEFAULT = 24
@@ -40,6 +44,21 @@ def _page_numbers(current: int, total: int, window: int = 2) -> list[int | None]
         out.append(p)
         prev = p
     return out
+
+
+def _get_source(state: AppState, image_id: int) -> tuple[LibraryImage, Path]:
+    """Fetch a library row and resolve its path into the library root.
+
+    404s if the row is missing or escapes photos_dir (e.g. via symlink), so no
+    route can read or delete a file outside the photos directory through a
+    stored record."""
+    img = state.library.get(image_id)
+    if not img:
+        raise HTTPException(status_code=404, detail="not found")
+    src = state.library.safe_path(img.path)
+    if src is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return img, src
 
 
 @router.get("", response_class=HTMLResponse)
@@ -80,19 +99,33 @@ async def list_images(
     )
 
 
-def _save_one_upload(file: UploadFile, target_dir: Path) -> tuple[Path | None, str | None]:
-    """Save a single upload. Returns (target_path, error_message)."""
+def _save_one_upload(
+    file: UploadFile, target_dir: Path, max_bytes: int
+) -> tuple[Path | None, str | None]:
+    """Save one uploaded file into the photos dir. Returns (target_path, error).
+
+    Streams in 1 MB chunks with a hard byte cap so an unauthenticated client
+    can't fill the disk; a short uuid suffix keeps same-millisecond uploads
+    distinct."""
     name = Path(file.filename or "").name or "upload"
     suffix = Path(name).suffix.lower()
     if suffix not in IMAGE_EXTS:
         return None, f"{name}: unsupported file type ({suffix or 'no extension'})"
-    safe_name = f"{int(time.time() * 1000)}-{name}"
-    target = target_dir / safe_name
+    target = target_dir / f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}-{name}"
+    written = 0
     try:
         with timed("nfs.write"), target.open("wb") as out:
-            shutil.copyfileobj(file.file, out)
+            while chunk := file.file.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    break
+                out.write(chunk)
     except OSError as e:
         return None, f"{name}: write failed ({e})"
+    if written > max_bytes:
+        with contextlib.suppress(OSError):
+            target.unlink(missing_ok=True)
+        return None, f"{name}: exceeds {max_bytes // (1024 * 1024)} MB upload limit"
     return target, None
 
 
@@ -108,7 +141,8 @@ def upload(
     saved: list[str] = []
     errors: list[str] = []
     for f in files:
-        path, err = _save_one_upload(f, target_dir)
+        max_bytes = state.settings.max_upload_mb * 1024 * 1024
+        path, err = _save_one_upload(f, target_dir, max_bytes)
         if path:
             state.library.add_path(path)
             saved.append(path.name)
@@ -127,8 +161,12 @@ def delete_image(image_id: int, state: AppState = Depends(get_state)):
     img = state.library.get(image_id)
     if not img:
         raise HTTPException(status_code=404, detail="not found")
+    target = state.library.safe_path(img.path)
+    if target is None:
+        log.warning("delete_image: refusing id %s — path escapes library root", image_id)
+        raise HTTPException(status_code=404, detail="not found")
     try:
-        Path(img.path).unlink(missing_ok=True)
+        Path(target).unlink(missing_ok=True)
     except OSError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     state.library.remove_path(Path(img.path))
@@ -137,18 +175,16 @@ def delete_image(image_id: int, state: AppState = Depends(get_state)):
 
 @router.get("/{image_id}/preview.png")
 def preview(image_id: int, state: AppState = Depends(get_state)):
-    img = state.library.get(image_id)
-    if not img:
-        raise HTTPException(status_code=404, detail="not found")
+    img, src = _get_source(state, image_id)
     # Fast path: the scheduler already filled the pipeline cache when it last
     # rendered this image. Skip the PIL decode + re-encode and stream the
     # cached PNG straight to the client.
-    fast = cached_png_bytes(Path(img.path), state.settings, state.cache, img.sha256)
+    fast = cached_png_bytes(src, state.settings, state.cache, img.sha256)
     if fast is not None:
         return Response(
             content=fast, media_type="image/png", headers=THUMB_CACHE_HEADERS
         )
-    processed = process(Path(img.path), state.settings, state.cache, img.sha256)
+    processed = process(src, state.settings, state.cache, img.sha256)
     buf = io.BytesIO()
     processed.image.convert("RGB").save(buf, format="PNG")
     return Response(
@@ -192,7 +228,7 @@ def bulk_delete(payload: dict, state: AppState = Depends(get_state)):
     return {"deleted": n}
 
 
-@router.get("/{image_id}/render-with.png")
+@router.get("/{image_id}/render-with.png", dependencies=[Depends(require_token)])
 def render_with(
     image_id: int,
     dither: str | None = None,
@@ -205,9 +241,7 @@ def render_with(
     """Preview the pipeline using ad-hoc settings (no DB write, no cache write
     on miss — caller passes hypotheticals for the Settings page slider preview).
     """
-    img = state.library.get(image_id)
-    if not img:
-        raise HTTPException(status_code=404, detail="not found")
+    img, src = _get_source(state, image_id)
     # Build a transient Settings copy with any overrides applied.
     base = state.settings.model_dump()
     if dither is not None:
@@ -220,9 +254,15 @@ def render_with(
         base["contrast"] = contrast
     if orientation is not None:
         base["orientation"] = orientation
+    from pydantic import ValidationError as _ValidationError
+
     from vibeframe.config import Settings as _Settings
 
-    transient = _Settings(**base)
+    try:
+        transient = _Settings(**base)
+    except _ValidationError as e:
+        # Out-of-range slider values are bad client input, not a server fault.
+        raise HTTPException(status_code=422, detail=str(e)) from e
     state.preview_tracker.start(image_id, img.path)
     try:
         # Pass the real cache so the rendered PNG is written under the cache
@@ -230,7 +270,7 @@ def render_with(
         # state.settings carries the same values, /preview.png hits this
         # cache key, and the "before" image updates without re-rendering.
         processed = process(
-            Path(img.path),
+            src,
             transient,
             cache=state.cache,
             sha256=img.sha256,
@@ -258,13 +298,11 @@ def source_cropped(image_id: int, state: AppState = Depends(get_state)):
     from vibeframe.processor import crop as crop_mod
     from vibeframe.processor.pipeline import _target_size
 
-    img = state.library.get(image_id)
-    if not img:
-        raise HTTPException(status_code=404, detail="not found")
+    img, src = _get_source(state, image_id)
 
     target_w, target_h = _target_size(state.settings.orientation)
     with timed("source_cropped"):
-        with PILImage.open(img.path) as raw:
+        with PILImage.open(src) as raw:
             # Decode large JPEGs at a reduced scale — same rationale as the
             # render pipeline. The hero only displays at panel size, so a full
             # 12 MP decode is wasted. draft() never upscales and no-ops on
@@ -292,10 +330,11 @@ def full_image(image_id: int, state: AppState = Depends(get_state)):
     from PIL import Image as PILImage
     from PIL import ImageOps
 
-    img = state.library.get(image_id)
-    if not img:
-        raise HTTPException(status_code=404, detail="not found")
-    with timed("full_preview"), PILImage.open(img.path) as raw:
+    img, src = _get_source(state, image_id)
+    with timed("full_preview"), PILImage.open(src) as raw:
+        # Decode at a reduced scale (same rationale as the render pipeline);
+        # draft() never upscales and no-ops on non-JPEG sources.
+        raw.draft("RGB", (1600, 1600))
         oriented = ImageOps.exif_transpose(raw).convert("RGB")
         oriented.thumbnail((1600, 1600), PILImage.Resampling.LANCZOS)
         buf = io.BytesIO()
@@ -307,10 +346,7 @@ def full_image(image_id: int, state: AppState = Depends(get_state)):
 
 @router.get("/{image_id}/thumb.png")
 def thumb(image_id: int, state: AppState = Depends(get_state)):
-    img = state.library.get(image_id)
-    if not img:
-        raise HTTPException(status_code=404, detail="not found")
-    src_path = Path(img.path)
+    _img, src_path = _get_source(state, image_id)
     try:
         cached = thumb_cache_path(state.settings, src_path)
     except FileNotFoundError as e:

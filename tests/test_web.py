@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import httpx
+import pytest
 from PIL import Image
 
 from vibeframe.cache import Cache
@@ -232,3 +234,80 @@ def test_html_pages_render(tmp_settings):
                 assert "text/html" in r.headers["content-type"]
 
     asyncio.run(run())
+
+
+def test_upload_rejects_oversized_file(tmp_path: Path, tmp_settings):
+    """POST /images/upload must enforce the max_upload_mb cap and leave no
+    partial file behind."""
+    tmp_settings.ensure_dirs()
+    app, _ = _setup(tmp_settings)
+    tmp_settings.max_upload_mb = 1
+
+    big = tmp_path / "big.jpg"
+    big.write_bytes(os.urandom(2 * 1024 * 1024))
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await _upload(client, big)
+            assert r.status_code == 200
+            body = r.json()
+            assert body["saved"] == []
+            assert any("exceeds" in e for e in body["errors"])
+
+    asyncio.run(run())
+    leftover = list(tmp_settings.upload_dir.glob("*")) if tmp_settings.upload_dir.exists() else []
+    assert leftover == []
+
+
+def test_delete_refuses_symlink_escape(tmp_path: Path, tmp_settings):
+    """A DB row whose path resolves outside photos_dir (e.g. a symlink) must not
+    be deletable through the API — the target file stays intact."""
+    tmp_settings.ensure_dirs()
+    photos = tmp_settings.photos_dir
+    photos.mkdir(parents=True, exist_ok=True)
+
+    outside = tmp_path / "outside.jpg"
+    Image.new("RGB", (8, 8), (1, 2, 3)).save(outside, "JPEG")
+    try:
+        os.symlink(outside, photos / "escape.jpg")
+    except OSError as e:
+        pytest.skip(f"symlinks unavailable here: {e}")
+
+    app, library = _setup(tmp_settings)
+    assert library.count() == 1
+    image_id = library.list(limit=1)[0].id
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.delete(f"/images/{image_id}")
+            return r
+
+    r = asyncio.run(run())
+    assert r.status_code == 404
+    assert outside.exists()
+    assert library.count() == 1
+
+
+def test_render_with_rejects_out_of_range_params(tmp_path: Path, tmp_settings):
+    """Out-of-range slider values on render-with.png are client input errors
+    (422), not server faults (500)."""
+    tmp_settings.ensure_dirs()
+    app, library = _setup(tmp_settings)
+
+    fixture = tmp_settings.photos_dir / "src.jpg"
+    Image.new("RGB", (64, 64), (10, 20, 30)).save(fixture, "JPEG")
+    library.scan()
+    image_id = library.list(limit=1)[0].id
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                f"/images/{image_id}/render-with.png", params={"saturation": 9}
+            )
+            return r
+
+    r = asyncio.run(run())
+    assert r.status_code == 422

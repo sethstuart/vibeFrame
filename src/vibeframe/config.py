@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     # Pi's memory. Generous enough for large phone photos (48-108 MP); JPEGs are
     # additionally scaled down at decode time via draft().
     max_image_pixels: int = Field(default=100_000_000, ge=1_000_000)
+    # Per-file ceiling for POST /images/upload. The endpoint is open by default
+    # when no web token is configured, so a runaway client must not be able to
+    # fill the Pi's SD card or the NFS mount.
+    max_upload_mb: int = Field(default=50, ge=1)
 
     @field_validator("tz")
     @classmethod
