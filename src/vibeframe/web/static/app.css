@@ -156,7 +156,7 @@ main.app-main.fit-viewport > .hero {
     height: auto;
     max-height: none;
     overflow: visible;
-    padding: var(--space-3) var(--space-4) calc(64px + var(--space-4));
+    padding: var(--space-3) var(--space-4) var(--space-4);
     gap: 0;            /* gap was a flex property; restore normal margins */
   }
   main.app-main.fit-viewport > .hero { min-height: 70vh; }
@@ -166,7 +166,7 @@ main.app-main.fit-viewport > .hero {
 @media (max-width: 720px) {
   header.app-header { padding: 0 var(--space-4); }
   nav.primary { display: none; } /* mobile uses bottom nav */
-  main.app-main { padding: var(--space-4) var(--space-4) calc(64px + var(--space-4)); }
+  main.app-main { padding: var(--space-4); }
 }
 
 /* Mobile bottom nav */
@@ -191,7 +191,7 @@ nav.mobile-nav {
   z-index: var(--z-sticky);
   background: var(--surface-raised);
   border-top: var(--border-hair) solid var(--border-default);
-  height: 64px;
+  height: var(--mobile-nav-height);
 }
 nav.mobile-nav ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); height: 100%; }
 nav.mobile-nav a {
@@ -202,8 +202,14 @@ nav.mobile-nav a {
 nav.mobile-nav a.active { color: var(--accent); }
 nav.mobile-nav svg { width: 22px; height: 22px; }
 @media (max-width: 720px) { nav.mobile-nav { display: block; } }
-/* The bottom nav is fixed, so the footer needs to clear it or it sits underneath. */
-@media (max-width: 720px) { footer.app-footer { margin-bottom: 64px; } }
+/* The bottom nav is fixed, so the end of the document has to reserve its
+   height or the last thing on the page sits underneath it. Reserve it exactly
+   once, on <body>. It used to be reserved twice — <main> padded for the nav
+   back when main was the last element, and the footer added its own margin
+   below itself once it was introduced after main. On the home page those two
+   stacked to ~170px of dead space and pushed the footer past the end of the
+   scroll range, where it could not be reached at all. */
+@media (max-width: 720px) { body { padding-bottom: var(--mobile-nav-height); } }
 
 /* ──────────────────────────────────────── primitives ─── */
 .stack { display: flex; flex-direction: column; }
@@ -465,6 +471,10 @@ input[type="range"] {
 .pager .current { background: var(--accent); color: var(--text-on-accent); border-color: var(--accent); }
 .pager .gap { background: transparent; border-color: transparent; color: var(--text-muted); }
 .pager .meta { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--text-xs); margin-left: auto; }
+/* The library pager is replaced by continuous scroll at the same breakpoint
+   where the bottom nav takes over. Same width query as .mobile-nav so the two
+   never disagree about what "mobile" means. */
+@media (max-width: 720px) { .pager.library-pager { display: none; } }
 
 /* ──────────────────────────────────────── Home / hero ── */
 /* Single-column vertical stack: page title, hero, actions, recent, upload.
@@ -661,6 +671,20 @@ main.app-main.fit-viewport .hero .hero-caption { flex: 0 0 auto; }
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 .photo-card:hover .actions, .photo-card.selected .actions { opacity: 1; }
+/* Touch devices have no hover, so hover-revealed actions meant a tap-and-hold
+   then a hurried stab at the star — and a miss opens the lightbox instead.
+   Show them permanently there. Keyed on hover *capability* rather than width:
+   a narrow desktop window keeps the reveal, a large tablet gets always-on.
+   .icon-btn already paints an opaque background, so they stay legible over
+   any photo without a scrim. */
+@media (hover: none) {
+  .photo-card .actions { opacity: 1; }
+}
+/* Infinite-scroll trip wire: a full-width, zero-height grid row, so it never
+   disturbs the tiling or leaves a gap. htmx fires it when it scrolls into
+   view — but only on mobile; the trigger filter in _photo_cards.html holds it
+   inert on desktop, where the numbered pager stays in charge. */
+.photo-grid .scroll-sentinel { grid-column: 1 / -1; height: 1px; }
 .photo-card .favorite-badge {
   position: absolute; top: var(--space-2); left: var(--space-2);
   background: rgba(77, 77, 77, 0.68);

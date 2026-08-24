@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import httpx
+import pytest
 from PIL import Image
 
 from vibeframe.cache import Cache
@@ -219,6 +221,64 @@ def test_backup_keep_persists_under_its_documented_key(tmp_settings):
     asyncio.run(run())
 
 
+def test_next_partial_url_encodes_filters():
+    """The sentinel URL goes through urlencode, unlike the pager's Jinja macro:
+    a search term containing & has to survive the round trip."""
+    from vibeframe.web.routes.images import _next_partial_url
+
+    url = _next_partial_url(offset=0, limit=24, favorites_only=True, q="a&b", sort="name")
+    assert url.startswith("/images?")
+    assert "offset=24" in url
+    assert "limit=24" in url
+    assert "partial=true" in url
+    assert "favorites_only=true" in url
+    assert "q=a%26b" in url
+    assert "sort=name" in url
+
+    # Defaults stay out of the URL so it reads like the ones a human writes.
+    plain = _next_partial_url(offset=0, limit=24, favorites_only=False, q=None, sort="newest")
+    assert "favorites_only" not in plain
+    assert "q=" not in plain
+    assert "sort" not in plain
+
+
+def test_library_paginates_on_desktop_and_streams_on_mobile(tmp_path: Path, tmp_settings):
+    """The first page carries both affordances — a pager CSS hides on mobile and
+    a sentinel whose htmx trigger filter holds it inert on desktop — and
+    ?partial=true returns bare cards for the sentinel to append."""
+    tmp_settings.ensure_dirs()
+    photos = tmp_settings.photos_dir
+    photos.mkdir(parents=True, exist_ok=True)
+    for i in range(3):
+        Image.new("RGB", (8, 8), (i * 10, i * 10, i * 10)).save(photos / f"p{i}.jpg", "JPEG")
+
+    app, library = _setup(tmp_settings)
+    assert library.count() == 3
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            first = await client.get("/images", params={"limit": 2})
+            assert first.status_code == 200
+            assert first.text.count('class="photo-card"') == 2
+            assert 'class="pager library-pager"' in first.text
+            assert 'class="scroll-sentinel"' in first.text
+            # Mobile-only gate. If this filter ever disappears, desktop silently
+            # turns into an infinite scroll.
+            assert "matchMedia('(max-width: 720px)')" in first.text
+
+            last = await client.get("/images", params={"limit": 2, "offset": 2, "partial": "true"})
+            assert last.status_code == 200
+            # Bare cards: no layout chrome to nest inside the existing page.
+            assert "<html" not in last.text
+            assert "app-header" not in last.text
+            assert last.text.count('class="photo-card"') == 1
+            # Last page — the chain has to stop, or the sentinel loops forever.
+            assert 'class="scroll-sentinel"' not in last.text
+
+    asyncio.run(run())
+
+
 def test_html_pages_render(tmp_settings):
     tmp_settings.ensure_dirs()
     app, _ = _setup(tmp_settings)
@@ -232,3 +292,136 @@ def test_html_pages_render(tmp_settings):
                 assert "text/html" in r.headers["content-type"]
 
     asyncio.run(run())
+
+
+def test_upload_rejects_oversized_file(tmp_path: Path, tmp_settings):
+    """POST /images/upload must enforce the max_upload_mb cap and leave no
+    partial file behind."""
+    tmp_settings.ensure_dirs()
+    app, _ = _setup(tmp_settings)
+    tmp_settings.max_upload_mb = 1
+
+    big = tmp_path / "big.jpg"
+    big.write_bytes(os.urandom(2 * 1024 * 1024))
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await _upload(client, big)
+            assert r.status_code == 200
+            body = r.json()
+            assert body["saved"] == []
+            assert any("exceeds" in e for e in body["errors"])
+
+    asyncio.run(run())
+    leftover = list(tmp_settings.upload_dir.glob("*")) if tmp_settings.upload_dir.exists() else []
+    assert leftover == []
+
+
+def test_symlink_escape_is_never_indexed_or_deletable(tmp_path: Path, tmp_settings):
+    """Two layers, both required.
+
+    A symlink pointing out of photos_dir must not be indexed at all — indexing
+    one produces a row every route then refuses, i.e. a broken tile that can't
+    be cleared. And a row that predates that filter (or was hand-written) must
+    still not be usable to delete the file it points at."""
+    from vibeframe.db import upsert_images
+
+    tmp_settings.ensure_dirs()
+    photos = tmp_settings.photos_dir
+    photos.mkdir(parents=True, exist_ok=True)
+
+    outside = tmp_path / "outside.jpg"
+    Image.new("RGB", (8, 8), (1, 2, 3)).save(outside, "JPEG")
+    escape = photos / "escape.jpg"
+    try:
+        os.symlink(outside, escape)
+    except OSError as e:
+        pytest.skip(f"symlinks unavailable here: {e}")
+
+    app, library = _setup(tmp_settings)
+    assert library.count() == 0, "escaping symlink must not enter the library"
+
+    stat = escape.stat()
+    upsert_images(
+        library.engine,
+        [{"path": str(escape), "sha256": "0" * 64, "mtime": stat.st_mtime, "size": stat.st_size}],
+    )
+    image_id = library.list(limit=1)[0].id
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.delete(f"/images/{image_id}")
+            return r
+
+    r = asyncio.run(run())
+    assert r.status_code == 404
+    assert outside.exists()
+    assert library.count() == 1
+
+
+def test_thumb_route_shares_the_warmers_cache_key(tmp_path: Path, tmp_settings):
+    """The thumb route and ThumbWarmer must derive the same cache path.
+
+    thumb_cache_path hashes the path *string*, and the warmer feeds it the
+    stored DB path. If the route resolved the path first, a photos_dir reached
+    through a symlink would key differently and every warmed thumbnail would be
+    missed and regenerated per request."""
+    from vibeframe.thumb_warmer import generate_thumb, thumb_cache_path
+
+    real = tmp_path / "real-photos"
+    real.mkdir()
+    link = tmp_path / "photos-link"
+    try:
+        os.symlink(real, link, target_is_directory=True)
+    except OSError as e:
+        pytest.skip(f"symlinks unavailable here: {e}")
+    tmp_settings.photos_dir = link
+    tmp_settings.ensure_dirs()
+
+    Image.new("RGB", (64, 64), (10, 20, 30)).save(real / "thumbme.jpg", "JPEG")
+    app, library = _setup(tmp_settings)
+    img = library.list(limit=1)[0]
+
+    # Warm exactly as ThumbWarmer._warm_once does: from the stored path.
+    warmed = thumb_cache_path(tmp_settings, Path(img.path))
+    warmed.parent.mkdir(parents=True, exist_ok=True)
+    warmed.write_bytes(generate_thumb(Path(img.path)))
+    before = sorted(p.name for p in warmed.parent.iterdir())
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(f"/images/{img.id}/thumb.png")
+            return r
+
+    r = asyncio.run(run())
+    assert r.status_code == 200
+    assert r.content == warmed.read_bytes()
+    assert sorted(p.name for p in warmed.parent.iterdir()) == before, (
+        "route wrote a second cache entry — it is not using the warmer's key"
+    )
+
+
+def test_render_with_rejects_out_of_range_params(tmp_path: Path, tmp_settings):
+    """Out-of-range slider values on render-with.png are client input errors
+    (422), not server faults (500)."""
+    tmp_settings.ensure_dirs()
+    app, library = _setup(tmp_settings)
+
+    fixture = tmp_settings.photos_dir / "src.jpg"
+    Image.new("RGB", (64, 64), (10, 20, 30)).save(fixture, "JPEG")
+    library.scan()
+    image_id = library.list(limit=1)[0].id
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(
+                f"/images/{image_id}/render-with.png", params={"saturation": 9}
+            )
+            return r
+
+    r = asyncio.run(run())
+    assert r.status_code == 422

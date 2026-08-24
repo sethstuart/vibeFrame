@@ -86,6 +86,13 @@ async def _serve() -> None:
 
     engine = build_engine(settings.db_path)
     _restore_persisted_settings(settings, engine)
+    if not settings.web_token and settings.web_host not in ("127.0.0.1", "localhost"):
+        log.warning(
+            "web UI is bound to %s:%d with no VIBEFRAME_WEB_TOKEN set — anyone on the "
+            "network can upload, delete photos, and change settings",
+            settings.web_host,
+            settings.web_port,
+        )
     # Reject decompression-bomb images before any decode (scan, thumb warm, or
     # a render) can exhaust memory on the 4 GB Pi.
     pipeline_mod.configure_pillow(settings.max_image_pixels)

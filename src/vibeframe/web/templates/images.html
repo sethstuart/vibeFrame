@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% from "_macros.html" import tag, icon_button, button, icon %}
+{# icon_button moved to _photo_cards.html along with the cards that used it. #}
+{% from "_macros.html" import tag %}
 {% set active = 'favorites' if favorites_only else 'library' %}
 {% macro page_url(page) -%}
   ?offset={{ (page - 1) * limit }}&limit={{ limit }}{% if favorites_only %}&favorites_only=true{% endif %}{% if q %}&q={{ q }}{% endif %}{% if sort and sort != 'newest' %}&sort={{ sort }}{% endif %}
@@ -36,44 +37,9 @@
   </form>
 
   <div class="photo-grid" :class="mode ? 'is-select-mode' : ''">
-    {% for img in images %}
-    <article class="photo-card" :class="has({{ img.id }}) ? 'selected' : ''">
-      <div class="thumb-wrap">
-        <span class="favorite-badge" aria-hidden="true"
-              x-show="isFav({{ img.id }})" x-cloak>★</span>
-        <span class="select-toggle" @click.stop="toggle({{ img.id }})"></span>
-        <!-- Click anywhere on the thumb opens the lightbox unless we're
-             in multi-select mode (then the click toggles selection).
-             The filename is carried on data-name (Jinja autoescapes it)
-             rather than interpolated into the JS expression — embedding a
-             |tojson string inside this double-quoted attribute would break
-             the attribute. -->
-        <img src="/images/{{ img.id }}/thumb.png" alt="{{ img.path }}" loading="lazy"
-             data-name="{{ img.path.split('/')[-1] }}"
-             style="cursor: pointer;"
-             @click="mode ? toggle({{ img.id }}) : openLightbox({{ img.id }}, $el.dataset.name)" />
-        <div class="actions" @click.stop>
-          <button type="button" class="icon-btn"
-                  :class="isFav({{ img.id }}) ? 'is-active' : ''"
-                  :aria-label="isFav({{ img.id }}) ? 'Unfavorite' : 'Favorite'"
-                  :title="isFav({{ img.id }}) ? 'Unfavorite' : 'Favorite'"
-                  @click="toggleFav({{ img.id }})">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <use :href="isFav({{ img.id }}) ? '/static/icons.svg#star-filled' : '/static/icons.svg#star'"/>
-            </svg>
-          </button>
-          {{ icon_button('skip-forward', 'Show now', extra='hx-post="/images/' ~ img.id ~ '/show" hx-swap="none"') }}
-          {{ icon_button('trash', 'Delete', variant='danger', extra='hx-delete="/images/' ~ img.id ~ '" hx-confirm="Delete ' ~ img.path ~ ' from NFS?" hx-swap="none"') }}
-        </div>
-      </div>
-      <div class="meta">
-        <span class="filename">{{ img.path.split('/')[-1] }}</span>
-      </div>
-    </article>
-    {% else %}
+    {% if images %}{% include "_photo_cards.html" %}{% else %}
     <p class="muted">No images.</p>
-    {% endfor %}
+    {% endif %}
   </div>
 
   <!-- Lightbox overlay. Click the backdrop or the × to dismiss. Esc also closes. -->
@@ -105,8 +71,10 @@
   </div>
 </div>
 
+{# Desktop only — CSS hides this below 720px, where the sentinel in
+   _photo_cards.html takes over with continuous scroll. #}
 {% if total_pages > 1 %}
-<nav class="pager" style="margin-top: var(--space-6);">
+<nav class="pager library-pager" style="margin-top: var(--space-6);">
   {% if current_page > 1 %}<a href="{{ page_url(current_page - 1) }}">← Prev</a>{% endif %}
   {% for p in page_numbers %}
     {% if p is none %}<span class="gap">…</span>

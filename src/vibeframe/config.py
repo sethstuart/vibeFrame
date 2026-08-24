@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     # Pi's memory. Generous enough for large phone photos (48-108 MP); JPEGs are
     # additionally scaled down at decode time via draft().
     max_image_pixels: int = Field(default=100_000_000, ge=1_000_000)
+    # Per-file ceiling for POST /images/upload: anything larger is discarded
+    # instead of landing in photos_dir. Note this caps what gets *kept*, not
+    # what gets written — Starlette has already spooled the whole request body
+    # to a temp file before the route runs, so it is not by itself a defence
+    # against a runaway client filling the disk. That needs a Content-Length
+    # check ahead of the multipart parse.
+    max_upload_mb: int = Field(default=50, ge=1)
 
     @field_validator("tz")
     @classmethod

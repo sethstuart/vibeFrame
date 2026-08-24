@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +25,9 @@ class Cache:
         self.root = root
         self.max_bytes = max_bytes
         self.root.mkdir(parents=True, exist_ok=True)
+        for stale in self.root.rglob("*.tmp"):
+            with contextlib.suppress(OSError):
+                stale.unlink()
 
     def path_for(self, key: CacheKey) -> Path:
         return self.root / key.relpath()
@@ -38,9 +43,24 @@ class Cache:
         return None
 
     def put_bytes(self, key: CacheKey, data: bytes) -> Path:
+        # Write to a temp name and atomically replace, so a crash mid-write
+        # leaves no truncated PNG at the final path (a "hit" serving garbage is
+        # worse than a miss). The rename is atomic; the data behind it is not
+        # fsynced first, so a power cut can still lose the contents on a
+        # filesystem that does not order data before a replacing rename — ext4's
+        # default ordered mode does, and an fsync per render is not worth it on
+        # the Pi's SD card. Unique suffix lets two renders of the same key race
+        # without clobbering each other's in-progress file.
         p = self.path_for(key)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(data)
+        tmp = p.with_name(f"{p.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            tmp.write_bytes(data)
+            os.replace(tmp, p)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
+            raise
         self.evict_if_needed()
         return p
 
