@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import logging
 import time
 import uuid
@@ -122,6 +123,7 @@ async def list_images(
         collection_id=collection_id,
     )
     favorite_ids = set(state.library.all_ids(favorites_only=True))
+    collections = list_collections(state.engine)
     next_partial = (
         _next_partial_url(offset, limit, favorites_only, q, sort, collection_id)
         if current_page < total_pages
@@ -146,8 +148,15 @@ async def list_images(
             "q": q or "",
             "sort": sort,
             "next_partial_url": next_partial,
-            "collections": list_collections(state.engine),
+            "collections": collections,
             "active_collection": active_collection,
+            # A plain str, deliberately NOT Markup: Jinja then autoescapes the
+            # quotes inside it when it lands in data-collections="...".
+            # jinja's |tojson escapes < > & ' but not ", so a collection named
+            # with a quote would otherwise break out of the attribute.
+            "collections_json": json.dumps(
+                [{"id": c.id, "name": c.name} for c in collections]
+            ),
         },
     )
 

@@ -617,6 +617,40 @@ main.app-main.fit-viewport .hero .hero-caption { flex: 0 0 auto; }
 .recent-strip .recent-card:hover { border-color: var(--accent); }
 .recent-strip .recent-card img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
 
+/* Collection picker overlay (library page) */
+.picker-overlay {
+  position: fixed; inset: 0; z-index: var(--z-modal);
+  background: rgba(28, 28, 28, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--space-4);
+}
+.picker-panel {
+  background: var(--surface-raised);
+  border: var(--border-hair) solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  width: min(360px, 100%);
+  max-height: min(70vh, 520px);
+  display: flex; flex-direction: column;
+  padding: var(--space-4);
+}
+.picker-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.picker-head h3 { margin: 0; font-family: var(--font-display); font-size: var(--text-base); }
+.picker-subject {
+  margin: var(--space-1) 0 var(--space-3);
+  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted);
+}
+.picker-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.picker-list li + li { border-top: var(--border-hair) solid var(--border-subtle); }
+.picker-list label {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-1);
+  cursor: pointer; font-size: var(--text-sm);
+}
+/* Comfortable touch target — this is the mobile flow the star could not serve. */
+.picker-list input[type="checkbox"] { width: 20px; height: 20px; flex: 0 0 auto; accent-color: var(--accent); }
+.picker-empty { color: var(--text-muted); font-size: var(--text-sm); margin: var(--space-2) 0 0; }
+
 /* ──────────────────────────────────────── Collections ── */
 .collection-new {
   display: flex; gap: var(--space-2); align-items: center;
@@ -638,6 +672,18 @@ main.app-main.fit-viewport .hero .hero-caption { flex: 0 0 auto; }
   margin: var(--space-2) 0 var(--space-4);
   font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted);
 }
+.collection-links { margin-bottom: var(--space-2); }
+.collection-details > summary {
+  cursor: pointer; list-style: none;
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  font-family: var(--font-display); font-size: var(--text-sm);
+  color: var(--accent);
+  padding: var(--space-1) 0;
+}
+.collection-details > summary::-webkit-details-marker { display: none; }
+.collection-details > summary::before { content: '+'; font-family: var(--font-mono); }
+.collection-details[open] > summary::before { content: '−'; }
+.collection-details[open] > summary { margin-bottom: var(--space-3); }
 .collection-edit { display: flex; flex-direction: column; gap: var(--space-3); }
 .collection-season {
   border: var(--border-hair) solid var(--border-subtle);

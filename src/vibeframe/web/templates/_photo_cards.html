@@ -37,6 +37,7 @@
           <use :href="isFav({{ img.id }}) ? '/static/icons.svg#star-filled' : '/static/icons.svg#star'"/>
         </svg>
       </button>
+      {{ icon_button('collection', 'Add to Collection', extra='@click="openPicker(' ~ img.id ~ ')"') }}
       {{ icon_button('skip-forward', 'Show now', extra='hx-post="/images/' ~ img.id ~ '/show" hx-swap="none"') }}
       {{ icon_button('trash', 'Delete', variant='danger', extra='hx-delete="/images/' ~ img.id ~ '" hx-confirm="Delete ' ~ img.path ~ ' from NFS?" hx-swap="none"') }}
     </div>

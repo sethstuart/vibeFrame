@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from sqlalchemy import event, inspect, text
@@ -242,6 +242,36 @@ def delete_image_by_path(engine, path: str) -> str | None:
         return sha
 
 
+def in_season(collection: Collection, today: date) -> bool:
+    """Is today inside this collection's recurring annual window?
+
+    Month/day only, so it repeats every year. Handles a window that wraps the
+    new year (Dec 15 - Jan 5) the same way quiet hours handle wrapping
+    midnight: inside means "after the start OR before the end" rather than
+    "between the two".
+    """
+    if collection.start_month is None or collection.end_month is None:
+        return False
+    if collection.start_day is None or collection.end_day is None:
+        return False
+    start = (collection.start_month, collection.start_day)
+    end = (collection.end_month, collection.end_day)
+    now = (today.month, today.day)
+    if start <= end:
+        return start <= now <= end
+    return now >= start or now <= end
+
+
+def effective_weight(collection: Collection, today: date) -> float:
+    """Weight to use for weighted selection right now: the base weight, times
+    the boost while the season window is open. This is what makes a Christmas
+    collection surface in December without needing a mode of its own."""
+    weight = max(0.0, collection.weight)
+    if weight == 0.0:
+        return 0.0
+    return weight * max(0.0, collection.boost) if in_season(collection, today) else weight
+
+
 class CollectionInUseError(Exception):
     """Raised when an operation is refused because it targets the built-in
     Favorites collection."""
@@ -357,6 +387,26 @@ def collection_counts(engine) -> dict[int, int]:
             )
         ).all()
     return {cid: int(n) for cid, n in rows}
+
+
+def least_recently_shown(engine, limit: int = 500) -> list[tuple[int, datetime | None]]:
+    """(image_id, last_shown) ordered oldest-first, never-shown first of all.
+
+    SQLite sorts NULL below every other value, so a plain ASC already puts the
+    never-shown at the front — no NULLS FIRST needed (it is only supported from
+    3.30 and this has to run on whatever the Pi's base image ships).
+    """
+    from sqlalchemy import func
+
+    with Session(engine) as session:
+        stmt = (
+            select(Image.id, func.max(History.shown_at).label("last_shown"))
+            .outerjoin(History, History.image_id == Image.id)
+            .group_by(Image.id)
+            .order_by(func.max(History.shown_at).asc())
+            .limit(limit)
+        )
+        return [(row[0], row[1]) for row in session.exec(stmt).all()]
 
 
 def record_show(engine, image_id: int) -> None:

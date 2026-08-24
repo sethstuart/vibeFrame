@@ -35,6 +35,15 @@
       {%- else %} · all year{% endif %}
     </p>
 
+    <div class="collection-links">
+      <a class="btn btn-ghost sm" href="/images?collection_id={{ c.id }}">View images →</a>
+    </div>
+
+    {# Collapsed by default: an always-open form per collection turns a handful
+       of them into an unreadable wall on a phone. <details> keeps that free of
+       JavaScript, matching the rest of this page. #}
+    <details class="collection-details">
+      <summary>Edit</summary>
     <form method="post" action="/collections/{{ c.id }}" class="collection-edit">
       <div class="field">
         <label for="name-{{ c.id }}">Name</label>
@@ -85,13 +94,12 @@
           <span class="season-label">Boost</span>
           <input name="boost" type="number" class="text-input day" min="0" max="100" step="0.5"
                  value="{{ '%g'|format(c.boost) }}" aria-label="In-season weight multiplier" />
-          <span class="help">Weight is multiplied by this while the window is open.</span>
         </div>
+        <span class="help">Weight is multiplied by this while the window is open.</span>
       </fieldset>
 
       <div class="collection-actions">
         <button type="submit" class="btn btn-secondary sm">Save</button>
-        <a class="btn btn-ghost sm" href="/images?collection_id={{ c.id }}">View images →</a>
       </div>
     </form>
 
@@ -101,6 +109,7 @@
       <button type="submit" class="btn btn-danger sm">Delete collection</button>
     </form>
     {% endif %}
+    </details>
   </article>
   {% endfor %}
 </div>

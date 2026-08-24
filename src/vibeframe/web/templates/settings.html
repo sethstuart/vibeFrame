@@ -41,7 +41,7 @@
                value="{{ refresh_minutes if refresh_minutes >= 1 else 1 }}" class="text-input" />
       {% endcall %}
       {% call field('Selection mode', 'selection_mode') %}
-        {{ select_input('selection_mode', ['shuffle', 'sequential', 'favorites', 'recent'], current=s.selection_mode) }}
+        {{ select_input('selection_mode', selection_modes, current=s.selection_mode) }}
       {% endcall %}
       {% call field('Quiet hours', 'quiet_hours_enabled', help='When off, the frame refreshes around the clock. “Show next” and “Show now” always override quiet hours.') %}
         <label class="checkbox-row">

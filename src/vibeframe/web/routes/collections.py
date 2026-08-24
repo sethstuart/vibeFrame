@@ -27,6 +27,9 @@ MONTHS = [
 ]
 _DAYS_IN_MONTH = {1: 31, 2: 29, 3: 31, 4: 30, 5: 31, 6: 30,
                   7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
+# Matches the cap on /images/bulk/*: a huge list would hit SQLite's variable
+# limit and 500 rather than saying no.
+_BULK_MAX = 1000
 
 
 def _opt_int(raw: str | None) -> int | None:
@@ -155,6 +158,41 @@ async def remove(collection_id: int, state: AppState = Depends(get_state)):
     if not deleted:
         raise HTTPException(status_code=404, detail="collection not found")
     return RedirectResponse("/collections", status_code=303)
+
+
+@router.get("/for-image/{image_id}")
+async def collections_for_image(image_id: int, state: AppState = Depends(get_state)):
+    """Which collections this image is in. Fetched when the picker opens rather
+    than embedded in every page render: with infinite scroll the page does not
+    know up front which cards it will end up holding."""
+    if state.library.get(image_id) is None:
+        raise HTTPException(status_code=404, detail="image not found")
+    return {"collection_ids": state.library.collections_for(image_id)}
+
+
+@router.post("/{collection_id}/bulk", dependencies=[Depends(require_token)])
+async def bulk_membership(
+    collection_id: int, payload: dict, state: AppState = Depends(get_state)
+):
+    """Add or remove many images at once, for the library's selection mode.
+
+    Declared before the /{collection_id}/images/{image_id} route so "bulk" is
+    never parsed as an image id.
+    """
+    if get_collection(state.engine, collection_id) is None:
+        raise HTTPException(status_code=404, detail="collection not found")
+    raw = payload.get("ids")
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=422, detail="expected an 'ids' list")
+    if len(raw) > _BULK_MAX:
+        raise HTTPException(status_code=422, detail=f"at most {_BULK_MAX} ids per request")
+    try:
+        ids = [int(i) for i in raw]
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=422, detail="ids must be integers") from e
+    member = bool(payload.get("member", True))
+    changed = state.library.bulk_set_collection(ids, collection_id, member)
+    return {"changed": changed, "member": member}
 
 
 @router.post("/{collection_id}/images/{image_id}", dependencies=[Depends(require_token)])

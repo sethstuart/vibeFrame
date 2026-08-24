@@ -8,11 +8,30 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import ValidationError
 
-from vibeframe.config import Settings
-from vibeframe.db import set_setting
+from vibeframe.config import COLLECTION_MODE_PREFIX, Settings
+from vibeframe.db import list_collections, set_setting
 from vibeframe.web.deps import AppState, get_state, require_token
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+# Built-in modes, with labels that say what they actually do — "least-shown"
+# alone does not explain that it is the one guaranteeing full coverage.
+_BUILTIN_MODE_LABELS = [
+    ("shuffle", "Shuffle — any image at random"),
+    ("weighted", "Weighted shuffle — favour collections, and their seasons"),
+    ("least-shown", "Least recently shown — cycle the whole library"),
+    ("sequential", "Sequential — by filename"),
+    ("recent", "Recently added"),
+    ("favorites", "Favorites only"),
+]
+
+
+def _selection_mode_options(engine) -> list[tuple[str, str]]:
+    """Built-in modes plus one "Only: <name>" entry per collection."""
+    options = list(_BUILTIN_MODE_LABELS)
+    for collection in list_collections(engine):
+        options.append((f"{COLLECTION_MODE_PREFIX}{collection.id}", f"Only: {collection.name}"))
+    return options
 
 
 @router.get("", response_class=HTMLResponse)
@@ -47,6 +66,9 @@ async def view_settings(
             "s": state.settings,
             "preview_id": preview_id,
             "saved": bool(saved),
+            # (value, label) pairs for the selection-mode dropdown, built here
+            # because the collection entries depend on the database.
+            "selection_modes": _selection_mode_options(state.engine),
             # Only render-affecting saves produce a new panel image worth
             # pushing, so only they raise the "push to frame?" prompt.
             "pushable": bool(pushable),
