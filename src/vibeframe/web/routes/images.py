@@ -10,7 +10,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
 
-from vibeframe.library import IMAGE_EXTS, LibraryImage
+from vibeframe.db import Image as DBImage
+from vibeframe.library import IMAGE_EXTS
 from vibeframe.processor.pipeline import cached_png_bytes, process
 from vibeframe.thumb_warmer import generate_thumb, thumb_cache_path
 from vibeframe.timing import timed
@@ -46,7 +47,7 @@ def _page_numbers(current: int, total: int, window: int = 2) -> list[int | None]
     return out
 
 
-def _get_source(state: AppState, image_id: int) -> tuple[LibraryImage, Path]:
+def _get_source(state: AppState, image_id: int) -> tuple[DBImage, Path]:
     """Fetch a library row and resolve its path into the library root.
 
     404s if the row is missing or escapes photos_dir (e.g. via symlink), so no
@@ -228,7 +229,12 @@ def bulk_delete(payload: dict, state: AppState = Depends(get_state)):
     return {"deleted": n}
 
 
-@router.get("/{image_id}/render-with.png", dependencies=[Depends(require_token)])
+# Deliberately not behind require_token. The settings page loads this as an
+# <img> src, and an <img> cannot send the X-Vibeframe-Token header the check
+# reads — gating it would break the live preview for anyone who sets a token.
+# Making the token usable from the browser at all is a separate piece of work
+# (nothing in the frontend sends that header for any route today).
+@router.get("/{image_id}/render-with.png")
 def render_with(
     image_id: int,
     dither: str | None = None,
@@ -298,7 +304,7 @@ def source_cropped(image_id: int, state: AppState = Depends(get_state)):
     from vibeframe.processor import crop as crop_mod
     from vibeframe.processor.pipeline import _target_size
 
-    img, src = _get_source(state, image_id)
+    _img, src = _get_source(state, image_id)
 
     target_w, target_h = _target_size(state.settings.orientation)
     with timed("source_cropped"):
@@ -330,7 +336,7 @@ def full_image(image_id: int, state: AppState = Depends(get_state)):
     from PIL import Image as PILImage
     from PIL import ImageOps
 
-    img, src = _get_source(state, image_id)
+    _img, src = _get_source(state, image_id)
     with timed("full_preview"), PILImage.open(src) as raw:
         # Decode at a reduced scale (same rationale as the render pipeline);
         # draft() never upscales and no-ops on non-JPEG sources.
@@ -346,9 +352,13 @@ def full_image(image_id: int, state: AppState = Depends(get_state)):
 
 @router.get("/{image_id}/thumb.png")
 def thumb(image_id: int, state: AppState = Depends(get_state)):
-    _img, src_path = _get_source(state, image_id)
+    img, src_path = _get_source(state, image_id)
     try:
-        cached = thumb_cache_path(state.settings, src_path)
+        # Key on the stored path, not the resolved one: thumb_cache_path hashes
+        # the path string, and ThumbWarmer warms with the DB path. Resolving
+        # here would give a different key and miss every warmed thumb whenever
+        # photos_dir contains a symlinked component.
+        cached = thumb_cache_path(state.settings, Path(img.path))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     if cached.is_file():

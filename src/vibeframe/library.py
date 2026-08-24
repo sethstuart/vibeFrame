@@ -39,6 +39,10 @@ def _is_image(p: Path) -> bool:
 class ImageLibrary:
     def __init__(self, root: Path, engine, recursive: bool = True, cache: Cache | None = None) -> None:
         self.root = root
+        # Resolved once: safe_path runs per image on every read and delete, and
+        # re-resolving the root each time is a syscall per call for a value that
+        # does not change.
+        self.root_resolved = root.resolve()
         self.engine = engine
         self.recursive = recursive
         self.cache = cache
@@ -111,7 +115,26 @@ class ImageLibrary:
         if not self.root.is_dir():
             return []
         glob = "**/*" if self.recursive else "*"
-        return [p for p in self.root.glob(glob) if _is_image(p)]
+        return [p for p in self.root.glob(glob) if _is_image(p) and self._contained(p)]
+
+    def _contained(self, p: Path) -> bool:
+        """Keep escaping symlinks out of the library entirely.
+
+        Indexing one produces a row that every read and delete route then
+        refuses (see safe_path) — an image that shows a broken tile, renders
+        nothing, and cannot be deleted. Rejecting it at ingest is the same
+        containment rule applied where it costs one check instead of eight,
+        and the next pruning scan clears any row indexed before this existed.
+
+        Only symlinks pay the resolve(); a plain file under the root is already
+        contained, and scan() walks every file on the Pi's NFS mount.
+        """
+        if not p.is_symlink():
+            return True
+        if self.safe_path(p) is not None:
+            return True
+        log.warning("skipping %s — symlink resolves outside %s", p, self.root)
+        return False
 
     def _prune_missing(self, present_paths: set[str]) -> None:
         with Session(self.engine) as session:
@@ -124,7 +147,7 @@ class ImageLibrary:
 
     def add_path(self, path: Path) -> None:
         with self._lock:
-            if not _is_image(path):
+            if not _is_image(path) or not self._contained(path):
                 return
             try:
                 stat = path.stat()
@@ -152,7 +175,7 @@ class ImageLibrary:
             resolved = Path(raw).resolve()
         except OSError:
             return None
-        if not resolved.is_relative_to(self.root.resolve()):
+        if not resolved.is_relative_to(self.root_resolved):
             return None
         return resolved
 

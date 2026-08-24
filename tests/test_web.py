@@ -260,22 +260,35 @@ def test_upload_rejects_oversized_file(tmp_path: Path, tmp_settings):
     assert leftover == []
 
 
-def test_delete_refuses_symlink_escape(tmp_path: Path, tmp_settings):
-    """A DB row whose path resolves outside photos_dir (e.g. a symlink) must not
-    be deletable through the API — the target file stays intact."""
+def test_symlink_escape_is_never_indexed_or_deletable(tmp_path: Path, tmp_settings):
+    """Two layers, both required.
+
+    A symlink pointing out of photos_dir must not be indexed at all — indexing
+    one produces a row every route then refuses, i.e. a broken tile that can't
+    be cleared. And a row that predates that filter (or was hand-written) must
+    still not be usable to delete the file it points at."""
+    from vibeframe.db import upsert_images
+
     tmp_settings.ensure_dirs()
     photos = tmp_settings.photos_dir
     photos.mkdir(parents=True, exist_ok=True)
 
     outside = tmp_path / "outside.jpg"
     Image.new("RGB", (8, 8), (1, 2, 3)).save(outside, "JPEG")
+    escape = photos / "escape.jpg"
     try:
-        os.symlink(outside, photos / "escape.jpg")
+        os.symlink(outside, escape)
     except OSError as e:
         pytest.skip(f"symlinks unavailable here: {e}")
 
     app, library = _setup(tmp_settings)
-    assert library.count() == 1
+    assert library.count() == 0, "escaping symlink must not enter the library"
+
+    stat = escape.stat()
+    upsert_images(
+        library.engine,
+        [{"path": str(escape), "sha256": "0" * 64, "mtime": stat.st_mtime, "size": stat.st_size}],
+    )
     image_id = library.list(limit=1)[0].id
 
     async def run():
@@ -288,6 +301,49 @@ def test_delete_refuses_symlink_escape(tmp_path: Path, tmp_settings):
     assert r.status_code == 404
     assert outside.exists()
     assert library.count() == 1
+
+
+def test_thumb_route_shares_the_warmers_cache_key(tmp_path: Path, tmp_settings):
+    """The thumb route and ThumbWarmer must derive the same cache path.
+
+    thumb_cache_path hashes the path *string*, and the warmer feeds it the
+    stored DB path. If the route resolved the path first, a photos_dir reached
+    through a symlink would key differently and every warmed thumbnail would be
+    missed and regenerated per request."""
+    from vibeframe.thumb_warmer import generate_thumb, thumb_cache_path
+
+    real = tmp_path / "real-photos"
+    real.mkdir()
+    link = tmp_path / "photos-link"
+    try:
+        os.symlink(real, link, target_is_directory=True)
+    except OSError as e:
+        pytest.skip(f"symlinks unavailable here: {e}")
+    tmp_settings.photos_dir = link
+    tmp_settings.ensure_dirs()
+
+    Image.new("RGB", (64, 64), (10, 20, 30)).save(real / "thumbme.jpg", "JPEG")
+    app, library = _setup(tmp_settings)
+    img = library.list(limit=1)[0]
+
+    # Warm exactly as ThumbWarmer._warm_once does: from the stored path.
+    warmed = thumb_cache_path(tmp_settings, Path(img.path))
+    warmed.parent.mkdir(parents=True, exist_ok=True)
+    warmed.write_bytes(generate_thumb(Path(img.path)))
+    before = sorted(p.name for p in warmed.parent.iterdir())
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get(f"/images/{img.id}/thumb.png")
+            return r
+
+    r = asyncio.run(run())
+    assert r.status_code == 200
+    assert r.content == warmed.read_bytes()
+    assert sorted(p.name for p in warmed.parent.iterdir()) == before, (
+        "route wrote a second cache entry — it is not using the warmer's key"
+    )
 
 
 def test_render_with_rejects_out_of_range_params(tmp_path: Path, tmp_settings):
