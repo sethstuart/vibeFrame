@@ -6,6 +6,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
@@ -62,6 +63,24 @@ def _get_source(state: AppState, image_id: int) -> tuple[DBImage, Path]:
     return img, src
 
 
+def _next_partial_url(
+    offset: int, limit: int, favorites_only: bool, q: str | None, sort: str
+) -> str:
+    """URL the infinite-scroll sentinel fetches for the page after this one.
+
+    Built here rather than in the template so the query string goes through
+    urlencode — the pager's Jinja macro interpolates `q` raw, which a search
+    term containing & would break."""
+    params: dict[str, str] = {"offset": str(offset + limit), "limit": str(limit), "partial": "true"}
+    if favorites_only:
+        params["favorites_only"] = "true"
+    if q:
+        params["q"] = q
+    if sort and sort != "newest":
+        params["sort"] = sort
+    return f"/images?{urlencode(params)}"
+
+
 @router.get("", response_class=HTMLResponse)
 async def list_images(
     request: Request,
@@ -70,6 +89,7 @@ async def list_images(
     offset: int = 0,
     q: str | None = None,
     sort: str = "newest",
+    partial: bool = False,
     state: AppState = Depends(get_state),
 ):
     limit = max(1, min(limit, PAGE_SIZE_MAX))
@@ -81,9 +101,17 @@ async def list_images(
         limit=limit, offset=offset, favorites_only=favorites_only, query=q, sort=sort
     )
     favorite_ids = set(state.library.all_ids(favorites_only=True))
+    next_partial = (
+        _next_partial_url(offset, limit, favorites_only, q, sort)
+        if current_page < total_pages
+        else None
+    )
+    # partial=true returns the cards alone (plus the next sentinel), which is
+    # what the mobile infinite scroll appends. Same template either way, so an
+    # appended card can't drift from a first-page one.
     return request.app.state.templates.TemplateResponse(
         request,
-        "images.html",
+        "_photo_cards.html" if partial else "images.html",
         {
             "images": images,
             "favorite_ids": favorite_ids,
@@ -96,6 +124,7 @@ async def list_images(
             "page_numbers": _page_numbers(current_page, total_pages),
             "q": q or "",
             "sort": sort,
+            "next_partial_url": next_partial,
         },
     )
 

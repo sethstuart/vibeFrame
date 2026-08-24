@@ -221,6 +221,64 @@ def test_backup_keep_persists_under_its_documented_key(tmp_settings):
     asyncio.run(run())
 
 
+def test_next_partial_url_encodes_filters():
+    """The sentinel URL goes through urlencode, unlike the pager's Jinja macro:
+    a search term containing & has to survive the round trip."""
+    from vibeframe.web.routes.images import _next_partial_url
+
+    url = _next_partial_url(offset=0, limit=24, favorites_only=True, q="a&b", sort="name")
+    assert url.startswith("/images?")
+    assert "offset=24" in url
+    assert "limit=24" in url
+    assert "partial=true" in url
+    assert "favorites_only=true" in url
+    assert "q=a%26b" in url
+    assert "sort=name" in url
+
+    # Defaults stay out of the URL so it reads like the ones a human writes.
+    plain = _next_partial_url(offset=0, limit=24, favorites_only=False, q=None, sort="newest")
+    assert "favorites_only" not in plain
+    assert "q=" not in plain
+    assert "sort" not in plain
+
+
+def test_library_paginates_on_desktop_and_streams_on_mobile(tmp_path: Path, tmp_settings):
+    """The first page carries both affordances — a pager CSS hides on mobile and
+    a sentinel whose htmx trigger filter holds it inert on desktop — and
+    ?partial=true returns bare cards for the sentinel to append."""
+    tmp_settings.ensure_dirs()
+    photos = tmp_settings.photos_dir
+    photos.mkdir(parents=True, exist_ok=True)
+    for i in range(3):
+        Image.new("RGB", (8, 8), (i * 10, i * 10, i * 10)).save(photos / f"p{i}.jpg", "JPEG")
+
+    app, library = _setup(tmp_settings)
+    assert library.count() == 3
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            first = await client.get("/images", params={"limit": 2})
+            assert first.status_code == 200
+            assert first.text.count('class="photo-card"') == 2
+            assert 'class="pager library-pager"' in first.text
+            assert 'class="scroll-sentinel"' in first.text
+            # Mobile-only gate. If this filter ever disappears, desktop silently
+            # turns into an infinite scroll.
+            assert "matchMedia('(max-width: 720px)')" in first.text
+
+            last = await client.get("/images", params={"limit": 2, "offset": 2, "partial": "true"})
+            assert last.status_code == 200
+            # Bare cards: no layout chrome to nest inside the existing page.
+            assert "<html" not in last.text
+            assert "app-header" not in last.text
+            assert last.text.count('class="photo-card"') == 1
+            # Last page — the chain has to stop, or the sentinel loops forever.
+            assert 'class="scroll-sentinel"' not in last.text
+
+    asyncio.run(run())
+
+
 def test_html_pages_render(tmp_settings):
     tmp_settings.ensure_dirs()
     app, _ = _setup(tmp_settings)

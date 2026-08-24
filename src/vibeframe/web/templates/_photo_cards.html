@@ -1,0 +1,62 @@
+{# One page of library cards, plus the sentinel that pulls the next page in.
+
+   Rendered two ways: inlined by images.html for the first page, and returned
+   on its own from GET /images?partial=true for every page after that. Keeping
+   it in one file is what guarantees an appended card is identical to a
+   first-page card.
+
+   The cards land inside images.html's x-data="libraryPage()" element, so
+   Alpine's mutation observer initialises them and they share the page's
+   selection and favourite state. No re-seeding is needed: favs is seeded from
+   *every* favourite in the library, not just the first page's. #}
+{% from "_macros.html" import icon_button %}
+{% for img in images %}
+<article class="photo-card" :class="has({{ img.id }}) ? 'selected' : ''">
+  <div class="thumb-wrap">
+    <span class="favorite-badge" aria-hidden="true"
+          x-show="isFav({{ img.id }})" x-cloak>★</span>
+    <span class="select-toggle" @click.stop="toggle({{ img.id }})"></span>
+    <!-- Click anywhere on the thumb opens the lightbox unless we're
+         in multi-select mode (then the click toggles selection).
+         The filename is carried on data-name (Jinja autoescapes it)
+         rather than interpolated into the JS expression — embedding a
+         |tojson string inside this double-quoted attribute would break
+         the attribute. -->
+    <img src="/images/{{ img.id }}/thumb.png" alt="{{ img.path }}" loading="lazy"
+         data-name="{{ img.path.split('/')[-1] }}"
+         style="cursor: pointer;"
+         @click="mode ? toggle({{ img.id }}) : openLightbox({{ img.id }}, $el.dataset.name)" />
+    <div class="actions" @click.stop>
+      <button type="button" class="icon-btn"
+              :class="isFav({{ img.id }}) ? 'is-active' : ''"
+              :aria-label="isFav({{ img.id }}) ? 'Unfavorite' : 'Favorite'"
+              :title="isFav({{ img.id }}) ? 'Unfavorite' : 'Favorite'"
+              @click="toggleFav({{ img.id }})">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <use :href="isFav({{ img.id }}) ? '/static/icons.svg#star-filled' : '/static/icons.svg#star'"/>
+        </svg>
+      </button>
+      {{ icon_button('skip-forward', 'Show now', extra='hx-post="/images/' ~ img.id ~ '/show" hx-swap="none"') }}
+      {{ icon_button('trash', 'Delete', variant='danger', extra='hx-delete="/images/' ~ img.id ~ '" hx-confirm="Delete ' ~ img.path ~ ' from NFS?" hx-swap="none"') }}
+    </div>
+  </div>
+  <div class="meta">
+    <span class="filename">{{ img.path.split('/')[-1] }}</span>
+  </div>
+</article>
+{% endfor %}
+{% if next_partial_url %}
+{# Replaces itself with the next page's cards *and* the next sentinel, so the
+   chain continues without any client-side offset bookkeeping.
+
+   The trigger filter is what keeps this mobile-only: htmx evaluates it when
+   the element is revealed, and on desktop it returns false, so the pager stays
+   the way you page. It cannot be done by hiding the sentinel in CSS —
+   htmx 1.9's isScrolledIntoView() reads a display:none element's all-zero
+   rect as on-screen and would fire immediately. #}
+<div class="scroll-sentinel" aria-hidden="true"
+     hx-get="{{ next_partial_url }}"
+     hx-trigger="revealed[window.matchMedia('(max-width: 720px)').matches]"
+     hx-swap="outerHTML"></div>
+{% endif %}
