@@ -45,6 +45,9 @@
   /* ── Layout ── */
   --container-max: 1100px;   /* matches the app's main width */
   --header-height: 60px;
+  /* Version strip at the foot of every page. fit-viewport subtracts it from
+     100vh, so changing this keeps the no-scroll home layout honest. */
+  --footer-height: 26px;
 
   /* ── Z-index scale ── */
   --z-base:     1;

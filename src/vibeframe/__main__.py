@@ -52,6 +52,7 @@ def _restore_persisted_settings(settings: Settings, engine) -> None:
         ("quiet_end", _parse_time),
         ("metrics_refresh_seconds", int),
         ("cache_max_bytes", int),
+        ("backup_keep", int),
     ]
     for name, parse in fields:
         raw = get_setting(engine, name)

@@ -79,6 +79,13 @@ COPY src ./src
 COPY README.md ./
 RUN pip install --no-deps --force-reinstall .
 
+# Build stamp shown in the web UI footer. Declared *after* the dependency layer
+# on purpose: the sha changes on every commit, and an ARG placed higher would
+# invalidate the ~5-minute numba/opencv install on every single build.
+# .dockerignore excludes .git, so this is the only way the image learns its sha.
+ARG VIBEFRAME_BUILD=""
+ENV VIBEFRAME_BUILD=${VIBEFRAME_BUILD}
+
 USER vibeframe
 
 EXPOSE 8080

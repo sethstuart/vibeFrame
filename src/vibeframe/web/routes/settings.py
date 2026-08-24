@@ -79,6 +79,7 @@ async def update_settings(
     quiet_end: str = Form(...),
     metrics_refresh_seconds: int = Form(...),
     cache_max_mb: int = Form(...),
+    backup_keep: int = Form(...),
 ):
     refresh_seconds = max(60, int(refresh_minutes) * 60)
     metrics_refresh_seconds = max(1, int(metrics_refresh_seconds))
@@ -109,6 +110,7 @@ async def update_settings(
         quiet_end=quiet_end_t,
         metrics_refresh_seconds=metrics_refresh_seconds,
         cache_max_bytes=cache_max_bytes,
+        backup_keep=backup_keep,
     )
     try:
         Settings(**candidate)
@@ -138,6 +140,7 @@ async def update_settings(
     s.quiet_end = quiet_end_t
     s.metrics_refresh_seconds = metrics_refresh_seconds
     s.cache_max_bytes = cache_max_bytes
+    s.backup_keep = backup_keep
     # The live Cache holds its own copy of the cap; update it and enforce a
     # lowered limit immediately rather than waiting for the next write. Eviction
     # walks the whole cache tree (slow on the SD card), so run it off the event
@@ -158,6 +161,8 @@ async def update_settings(
         "quiet_end": quiet_end,
         "metrics_refresh_seconds": str(metrics_refresh_seconds),
         "cache_max_bytes": str(cache_max_bytes),
+        # Read back out of this table by scripts/vibeframe-backup.sh on the host.
+        "backup_keep": str(backup_keep),
     }.items():
         set_setting(state.engine, k, v)
 

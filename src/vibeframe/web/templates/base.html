@@ -51,6 +51,10 @@
     {% block body %}{% endblock %}
   </main>
 
+  <footer class="app-footer">
+    <span>vibeFrame v{{ app_version }}{% if app_build %} · build {{ app_build }}{% endif %}</span>
+  </footer>
+
   <nav class="mobile-nav">
     <ul>
       <li><a href="/" class="{% if active == 'home' %}active{% endif %}">{{ icon('home', 22) }}Home</a></li>
