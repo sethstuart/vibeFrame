@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {# icon_button moved to _photo_cards.html along with the cards that used it. #}
 {% from "_macros.html" import tag %}
-{% set active = 'favorites' if favorites_only else 'library' %}
+{% set active = 'library' %}
 {% macro page_url(page) -%}
   ?offset={{ (page - 1) * limit }}&limit={{ limit }}{% if favorites_only %}&favorites_only=true{% endif %}{% if q %}&q={{ q }}{% endif %}{% if sort and sort != 'newest' %}&sort={{ sort }}{% endif %}
 {%- endmacro %}
 {% block body %}
 <div x-data="libraryPage()">
   <section class="library-header">
-    <h1>{% if favorites_only %}Favorites{% else %}Library{% endif %}
+    <h1>{% if active_collection %}{{ active_collection.name }}{% else %}Library{% endif %}
       <span class="count">{{ total }} {% if total == 1 %}image{% else %}images{% endif %}</span>
     </h1>
     <div class="cluster">
@@ -20,9 +20,14 @@
   </section>
 
   <form method="get" action="/images" class="filter-bar">
+    {# One tag per collection. Favorites is simply the first of them now — it
+       has no special URL any more, just the default collection's id. #}
     <div class="filter-tags">
-      {{ tag('All', href='/images?sort=' + sort, active=not favorites_only) }}
-      {{ tag('Favorites', href='/images?favorites_only=true&sort=' + sort, active=favorites_only) }}
+      {{ tag('All', href='/images?sort=' + sort, active=not active_collection) }}
+      {% for c in collections %}
+        {{ tag(c.name, href='/images?collection_id=' ~ c.id ~ '&sort=' ~ sort,
+               active=active_collection and active_collection.id == c.id) }}
+      {% endfor %}
     </div>
     <div class="filter-controls">
       <input type="search" name="q" value="{{ q }}" placeholder="Search filename…" />
@@ -31,7 +36,7 @@
         <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>Oldest</option>
         <option value="name" {% if sort == 'name' %}selected{% endif %}>Name</option>
       </select>
-      {% if favorites_only %}<input type="hidden" name="favorites_only" value="true" />{% endif %}
+      {% if active_collection %}<input type="hidden" name="collection_id" value="{{ active_collection.id }}" />{% endif %}
       <button type="submit" class="btn btn-secondary sm">Apply</button>
     </div>
   </form>

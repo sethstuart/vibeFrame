@@ -617,6 +617,45 @@ main.app-main.fit-viewport .hero .hero-caption { flex: 0 0 auto; }
 .recent-strip .recent-card:hover { border-color: var(--accent); }
 .recent-strip .recent-card img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
 
+/* ──────────────────────────────────────── Collections ── */
+.collection-new {
+  display: flex; gap: var(--space-2); align-items: center;
+  margin-bottom: var(--space-5);
+}
+.collection-new .text-input { flex: 1 1 auto; max-width: 360px; }
+
+.collection-list { display: grid; gap: var(--space-4); }
+@media (min-width: 900px) {
+  .collection-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.collection-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.collection-head h3 {
+  display: flex; align-items: baseline; gap: var(--space-2);
+  font-family: var(--font-display); font-size: var(--text-lg); margin: 0;
+}
+.collection-head .count { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); white-space: nowrap; }
+.collection-summary {
+  margin: var(--space-2) 0 var(--space-4);
+  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted);
+}
+.collection-edit { display: flex; flex-direction: column; gap: var(--space-3); }
+.collection-season {
+  border: var(--border-hair) solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  display: flex; flex-direction: column; gap: var(--space-2);
+  margin: 0;
+}
+.collection-season legend {
+  font-family: var(--font-display); font-size: var(--text-xs);
+  color: var(--text-secondary); padding: 0 var(--space-2);
+}
+.season-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.season-label { font-size: var(--text-xs); color: var(--text-muted); min-width: 3.5rem; }
+.text-input.day { width: 5.5rem; }
+.collection-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.collection-delete { margin-top: var(--space-3); }
+
 /* ──────────────────────────────────────── Library grid ── */
 .filter-bar {
   position: sticky; top: var(--header-height); z-index: 2;

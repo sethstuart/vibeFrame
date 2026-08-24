@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
 
 from vibeframe.db import Image as DBImage
+from vibeframe.db import get_collection, list_collections
 from vibeframe.library import IMAGE_EXTS
 from vibeframe.processor.pipeline import cached_png_bytes, process
 from vibeframe.thumb_warmer import generate_thumb, thumb_cache_path
@@ -64,7 +65,12 @@ def _get_source(state: AppState, image_id: int) -> tuple[DBImage, Path]:
 
 
 def _next_partial_url(
-    offset: int, limit: int, favorites_only: bool, q: str | None, sort: str
+    offset: int,
+    limit: int,
+    favorites_only: bool,
+    q: str | None,
+    sort: str,
+    collection_id: int | None = None,
 ) -> str:
     """URL the infinite-scroll sentinel fetches for the page after this one.
 
@@ -74,6 +80,8 @@ def _next_partial_url(
     params: dict[str, str] = {"offset": str(offset + limit), "limit": str(limit), "partial": "true"}
     if favorites_only:
         params["favorites_only"] = "true"
+    if collection_id is not None:
+        params["collection_id"] = str(collection_id)
     if q:
         params["q"] = q
     if sort and sort != "newest":
@@ -90,19 +98,32 @@ async def list_images(
     q: str | None = None,
     sort: str = "newest",
     partial: bool = False,
+    collection_id: int | None = None,
     state: AppState = Depends(get_state),
 ):
     limit = max(1, min(limit, PAGE_SIZE_MAX))
     offset = max(0, offset)
-    total = state.library.count(favorites_only=favorites_only)
+    # A collection that has since been deleted would otherwise render an empty
+    # grid with no explanation; fall back to the whole library instead.
+    active_collection = (
+        get_collection(state.engine, collection_id) if collection_id is not None else None
+    )
+    if active_collection is None:
+        collection_id = None
+    total = state.library.count(favorites_only=favorites_only, collection_id=collection_id)
     total_pages = max(1, (total + limit - 1) // limit) if total else 1
     current_page = offset // limit + 1
     images = state.library.list(
-        limit=limit, offset=offset, favorites_only=favorites_only, query=q, sort=sort
+        limit=limit,
+        offset=offset,
+        favorites_only=favorites_only,
+        query=q,
+        sort=sort,
+        collection_id=collection_id,
     )
     favorite_ids = set(state.library.all_ids(favorites_only=True))
     next_partial = (
-        _next_partial_url(offset, limit, favorites_only, q, sort)
+        _next_partial_url(offset, limit, favorites_only, q, sort, collection_id)
         if current_page < total_pages
         else None
     )
@@ -125,6 +146,8 @@ async def list_images(
             "q": q or "",
             "sort": sort,
             "next_partial_url": next_partial,
+            "collections": list_collections(state.engine),
+            "active_collection": active_collection,
         },
     )
 

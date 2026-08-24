@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% set active = 'collections' %}
+{% macro season_label(c) -%}
+  {%- if c.start_month -%}
+    {{ months[c.start_month - 1][1] }} {{ c.start_day }} – {{ months[c.end_month - 1][1] }} {{ c.end_day }}
+  {%- else -%}All year{%- endif -%}
+{%- endmacro %}
+{% block body %}
+<section class="page-title">
+  <h1>Collections</h1>
+  <span class="subtitle">a photo can live in any number of them</span>
+</section>
+
+<form method="post" action="/collections" class="collection-new">
+  <input type="text" name="name" class="text-input" placeholder="New collection name…"
+         maxlength="80" required aria-label="New collection name" />
+  <button type="submit" class="btn btn-primary sm">{{ icon('plus', 16) }}<span>Create</span></button>
+</form>
+
+<div class="collection-list">
+  {% for c in collections %}
+  <article class="card padded collection-card">
+    <header class="collection-head">
+      <h3>
+        {{ c.name }}
+        {% if c.is_default %}<span class="badge">built-in</span>{% endif %}
+      </h3>
+      <span class="count">{{ counts.get(c.id, 0) }} of {{ total }}</span>
+    </header>
+
+    <p class="collection-summary">
+      Weight {{ '%g'|format(c.weight) }}
+      {%- if c.start_month %} · {{ season_label(c) }}, ×{{ '%g'|format(c.boost) }} in season
+      {%- else %} · all year{% endif %}
+    </p>
+
+    <form method="post" action="/collections/{{ c.id }}" class="collection-edit">
+      <div class="field">
+        <label for="name-{{ c.id }}">Name</label>
+        <input id="name-{{ c.id }}" name="name" type="text" class="text-input" maxlength="80"
+               value="{{ c.name }}" {% if c.is_default %}readonly
+               title="The built-in collection keeps its name"{% endif %} />
+      </div>
+
+      <div class="field">
+        <label for="weight-{{ c.id }}">Weight</label>
+        <input id="weight-{{ c.id }}" name="weight" type="number" class="text-input"
+               min="0" max="100" step="0.5" value="{{ '%g'|format(c.weight) }}" />
+        <span class="help">Relative likelihood under weighted selection. 0 excludes it.</span>
+      </div>
+
+      {# Recurring annual window: the same Dec 1 – Dec 25 applies every year, so
+         there is deliberately no year field. Leave all four blank for no season. #}
+      <fieldset class="collection-season">
+        <legend>Season (optional, repeats every year)</legend>
+        {# Written out rather than via select_input: that macro derives `name`
+           from its first argument, and the ids here have to be unique per
+           collection while the field names must not be. #}
+        <div class="season-row">
+          <span class="season-label">From</span>
+          <select id="start_month-{{ c.id }}" name="start_month" class="select-input"
+                  aria-label="Season start month">
+            <option value="">—</option>
+            {% for num, label in months %}
+            <option value="{{ num }}" {% if c.start_month == num %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <input name="start_day" type="number" class="text-input day" min="1" max="31"
+                 placeholder="day" value="{{ c.start_day or '' }}" aria-label="Season start day" />
+        </div>
+        <div class="season-row">
+          <span class="season-label">To</span>
+          <select id="end_month-{{ c.id }}" name="end_month" class="select-input"
+                  aria-label="Season end month">
+            <option value="">—</option>
+            {% for num, label in months %}
+            <option value="{{ num }}" {% if c.end_month == num %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <input name="end_day" type="number" class="text-input day" min="1" max="31"
+                 placeholder="day" value="{{ c.end_day or '' }}" aria-label="Season end day" />
+        </div>
+        <div class="season-row">
+          <span class="season-label">Boost</span>
+          <input name="boost" type="number" class="text-input day" min="0" max="100" step="0.5"
+                 value="{{ '%g'|format(c.boost) }}" aria-label="In-season weight multiplier" />
+          <span class="help">Weight is multiplied by this while the window is open.</span>
+        </div>
+      </fieldset>
+
+      <div class="collection-actions">
+        <button type="submit" class="btn btn-secondary sm">Save</button>
+        <a class="btn btn-ghost sm" href="/images?collection_id={{ c.id }}">View images →</a>
+      </div>
+    </form>
+
+    {% if not c.is_default %}
+    <form method="post" action="/collections/{{ c.id }}/delete" class="collection-delete"
+          onsubmit="return confirm('Delete the {{ c.name }} collection? The photos stay in your library.');">
+      <button type="submit" class="btn btn-danger sm">Delete collection</button>
+    </form>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% endblock %}
