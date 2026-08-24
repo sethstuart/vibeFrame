@@ -4,13 +4,13 @@ import asyncio
 import contextlib
 import logging
 import random
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from vibeframe.cache import Cache
-from vibeframe.config import Settings
-from vibeframe.db import record_show
+from vibeframe.config import Settings, collection_mode_id
+from vibeframe.db import effective_weight, least_recently_shown, list_collections, record_show
 from vibeframe.display.base import DisplayDriver
 from vibeframe.library import ImageLibrary
 from vibeframe.processor.pipeline import process
@@ -30,12 +30,80 @@ def is_quiet(now: datetime, start: time, end: time) -> bool:
     return t >= start or t < end
 
 
+def _pick_least_shown(engine) -> int | None:
+    """The image that has gone longest without being displayed.
+
+    This is the mode that guarantees you eventually see the whole library
+    instead of the same handful. Ties -- which is every image on a fresh
+    install, where nothing has been shown -- are broken at random so the first
+    pass through is not just scan order.
+    """
+    rows = least_recently_shown(engine)
+    if not rows:
+        return None
+    oldest = rows[0][1]
+    tied = [image_id for image_id, last in rows if last == oldest]
+    return random.choice(tied) if tied else rows[0][0]
+
+
+def _pick_weighted(library: ImageLibrary, engine, today: date) -> int | None:
+    """Weighted shuffle across collections.
+
+    Each collection is a pool whose weight is its base weight times its boost
+    while its season window is open -- that is the whole "prefer the Christmas
+    collection in December" behaviour, with no per-collection mode needed.
+
+    The full library is always in the draw as a baseline pool of weight 1, so
+    uncollected photos still appear and the mode degrades to a plain shuffle
+    when nothing is collected yet. An image sitting in several collections gets
+    proportionally more chances, which is the intuitive reading of putting it
+    in several.
+    """
+    pools: list[tuple[float, list[int]]] = []
+    everything = library.all_ids()
+    if not everything:
+        return None
+    pools.append((1.0, everything))
+    for collection in list_collections(engine):
+        weight = effective_weight(collection, today)
+        if weight <= 0:
+            continue
+        ids = library.all_ids(collection_id=collection.id)
+        if ids:
+            pools.append((weight, ids))
+
+    total = sum(weight for weight, _ in pools)
+    if total <= 0:
+        return random.choice(everything)
+    draw = random.uniform(0, total)
+    for weight, ids in pools:
+        draw -= weight
+        if draw <= 0:
+            return random.choice(ids)
+    return random.choice(pools[-1][1])
+
+
 def _pick_next(
     library: ImageLibrary,
     mode: str,
     last_path: str | None,
+    engine=None,
+    today: date | None = None,
 ) -> int | None:
-    if mode == "favorites":
+    collection_id = collection_mode_id(mode)
+    if collection_id is not None:
+        ids = library.all_ids(collection_id=collection_id)
+        # An emptied or deleted collection would otherwise freeze the frame on
+        # whatever is already up. Showing something beats showing nothing.
+        if not ids:
+            log.warning("collection %s is empty or gone; falling back to the whole library",
+                        collection_id)
+            ids = library.all_ids()
+    elif mode == "least-shown" and engine is not None:
+        return _pick_least_shown(engine)
+    elif mode == "weighted" and engine is not None:
+        return _pick_weighted(library, engine, today or datetime.now(UTC).date())
+    elif mode == "favorites":
         ids = library.all_ids(favorites_only=True)
         if not ids:
             ids = library.all_ids()
@@ -126,7 +194,13 @@ class Scheduler:
                 image_id = self._next_override
                 self._next_override = None
             else:
-                image_id = _pick_next(self.library, self.settings.selection_mode, self._last_path)
+                image_id = _pick_next(
+                    self.library,
+                    self.settings.selection_mode,
+                    self._last_path,
+                    engine=self.engine,
+                    today=now_local.date(),
+                )
         if image_id is None:
             log.info("no images available to display")
             return

@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {# icon_button moved to _photo_cards.html along with the cards that used it. #}
 {% from "_macros.html" import tag %}
-{% set active = 'favorites' if favorites_only else 'library' %}
+{% set active = 'library' %}
 {% macro page_url(page) -%}
   ?offset={{ (page - 1) * limit }}&limit={{ limit }}{% if favorites_only %}&favorites_only=true{% endif %}{% if q %}&q={{ q }}{% endif %}{% if sort and sort != 'newest' %}&sort={{ sort }}{% endif %}
 {%- endmacro %}
 {% block body %}
 <div x-data="libraryPage()">
   <section class="library-header">
-    <h1>{% if favorites_only %}Favorites{% else %}Library{% endif %}
+    <h1>{% if active_collection %}{{ active_collection.name }}{% else %}Library{% endif %}
       <span class="count">{{ total }} {% if total == 1 %}image{% else %}images{% endif %}</span>
     </h1>
     <div class="cluster">
@@ -20,9 +20,14 @@
   </section>
 
   <form method="get" action="/images" class="filter-bar">
+    {# One tag per collection. Favorites is simply the first of them now — it
+       has no special URL any more, just the default collection's id. #}
     <div class="filter-tags">
-      {{ tag('All', href='/images?sort=' + sort, active=not favorites_only) }}
-      {{ tag('Favorites', href='/images?favorites_only=true&sort=' + sort, active=favorites_only) }}
+      {{ tag('All', href='/images?sort=' + sort, active=not active_collection) }}
+      {% for c in collections %}
+        {{ tag(c.name, href='/images?collection_id=' ~ c.id ~ '&sort=' ~ sort,
+               active=active_collection and active_collection.id == c.id) }}
+      {% endfor %}
     </div>
     <div class="filter-controls">
       <input type="search" name="q" value="{{ q }}" placeholder="Search filename…" />
@@ -31,7 +36,7 @@
         <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>Oldest</option>
         <option value="name" {% if sort == 'name' %}selected{% endif %}>Name</option>
       </select>
-      {% if favorites_only %}<input type="hidden" name="favorites_only" value="true" />{% endif %}
+      {% if active_collection %}<input type="hidden" name="collection_id" value="{{ active_collection.id }}" />{% endif %}
       <button type="submit" class="btn btn-secondary sm">Apply</button>
     </div>
   </form>
@@ -40,6 +45,37 @@
     {% if images %}{% include "_photo_cards.html" %}{% else %}
     <p class="muted">No images.</p>
     {% endif %}
+  </div>
+
+  <!-- Collection picker. One panel for the whole page rather than one per card:
+       24 cards x N collections of hidden markup is a lot of DOM for something
+       only ever open once at a time. It doubles as the bulk picker — when
+       pickerIds holds more than one id the checkboxes apply to all of them. -->
+  <span id="collections-data" hidden data-collections="{{ collections_json }}"></span>
+  <div class="picker-overlay" x-show="pickerIds.length" x-cloak
+       @click.self="closePicker()"
+       @keydown.escape.window="closePicker()">
+    <div class="picker-panel" role="dialog" aria-label="Add to collection">
+      <header class="picker-head">
+        <h3>Add to collection</h3>
+        <button type="button" class="icon-btn" aria-label="Close" @click="closePicker()">×</button>
+      </header>
+      <p class="picker-subject" x-text="pickerLabel"></p>
+      <ul class="picker-list">
+        <template x-for="c in allCollections" :key="c.id">
+          <li>
+            <label>
+              <input type="checkbox" :checked="picked.has(c.id)"
+                     :disabled="pickerBusy" @change="togglePick(c.id)" />
+              <span x-text="c.name"></span>
+            </label>
+          </li>
+        </template>
+      </ul>
+      <p class="picker-empty" x-show="!allCollections.length">
+        No collections yet — make one on the Collections page.
+      </p>
+    </div>
   </div>
 
   <!-- Lightbox overlay. Click the backdrop or the × to dismiss. Esc also closes. -->
@@ -63,6 +99,9 @@
     <button class="btn btn-secondary sm"
             @click="fetch('/images/bulk/favorite', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: list(), favorited: false})}).then(()=>{clear(); location.reload();})">
       Unfavorite
+    </button>
+    <button class="btn btn-secondary sm" @click="openBulkPicker()">
+      Add to collection
     </button>
     <button class="btn btn-danger sm"
             @click="if(confirm('Delete '+count+' images from NFS?')) fetch('/images/bulk/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: list()})}).then(()=>{clear(); location.reload();})">
@@ -100,6 +139,12 @@
       lbOpen: false,
       lbId: null,
       lbPath: null,
+      // Collection picker. pickerIds is the images being edited — one from a
+      // card button, or the whole selection from the bulk bar.
+      pickerIds: [],
+      picked: new Set(),
+      pickerBusy: false,
+      _cols: null,
       toggleMode() { this.mode = !this.mode; if (!this.mode) this.ids.clear(); },
       toggle(id) {
         if (this.ids.has(id)) this.ids.delete(id); else this.ids.add(id);
@@ -120,6 +165,74 @@
             if (wasFav) this.favs.add(id); else this.favs.delete(id);
             this.favs = new Set(this.favs);
           });
+      },
+      // Read once from a data-* attribute rather than interpolated into an
+      // Alpine expression: tojson emits double quotes and would break out of
+      // the attribute (see CLAUDE.md).
+      get allCollections() {
+        if (this._cols === null) {
+          const el = document.getElementById('collections-data');
+          try { this._cols = el ? JSON.parse(el.dataset.collections) : []; }
+          catch (e) { this._cols = []; }
+        }
+        return this._cols;
+      },
+      get pickerLabel() {
+        const n = this.pickerIds.length;
+        return n === 1 ? 'This photo' : `${n} photos`;
+      },
+      async openPicker(id) {
+        this.pickerIds = [id];
+        this.picked = new Set();
+        // Fetched on open, not embedded per card: with infinite scroll the page
+        // doesn't know up front which cards it will end up holding.
+        try {
+          const r = await fetch(`/collections/for-image/${id}`);
+          if (r.ok) this.picked = new Set((await r.json()).collection_ids);
+        } catch (e) { /* leave everything unchecked; a click still works */ }
+      },
+      openBulkPicker() {
+        // No shared starting state across a mixed selection, so start blank:
+        // ticking a box adds all of them, unticking removes all of them.
+        this.pickerIds = this.list();
+        this.picked = new Set();
+      },
+      closePicker() { this.pickerIds = []; this.picked = new Set(); this.pickerBusy = false; },
+      async togglePick(cid) {
+        if (this.pickerBusy) return;
+        const adding = !this.picked.has(cid);
+        if (adding) this.picked.add(cid); else this.picked.delete(cid);
+        this.picked = new Set(this.picked);
+        this.pickerBusy = true;
+        const ids = this.pickerIds;
+        try {
+          if (ids.length === 1) {
+            const url = `/collections/${cid}/images/${ids[0]}`;
+            const r = await fetch(url, { method: adding ? 'POST' : 'DELETE' });
+            if (!r.ok) throw new Error(r.status);
+          } else {
+            const r = await fetch(`/collections/${cid}/bulk`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids, member: adding }),
+            });
+            if (!r.ok) throw new Error(r.status);
+          }
+          // Favourites is a collection like any other, so the star has to
+          // follow when the picker touches it.
+          const favId = this.allCollections.length ? this.allCollections[0].id : null;
+          if (cid === favId) {
+            for (const id of ids) {
+              if (adding) this.favs.add(id); else this.favs.delete(id);
+            }
+            this.favs = new Set(this.favs);
+          }
+        } catch (e) {
+          if (adding) this.picked.delete(cid); else this.picked.add(cid);
+          this.picked = new Set(this.picked);
+        } finally {
+          this.pickerBusy = false;
+        }
       },
       openLightbox(id, path) { this.lbId = id; this.lbPath = path; this.lbOpen = true; },
       closeLightbox() { this.lbOpen = false; this.lbId = null; this.lbPath = null; },

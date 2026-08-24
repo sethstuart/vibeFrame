@@ -10,7 +10,27 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Orientation = Literal[0, 90, 180, 270]
 DriverName = Literal["auto", "mock", "inky"]
-SelectionMode = Literal["shuffle", "sequential", "favorites", "recent"]
+# Not a Literal any more: "collection:<id>" is also valid, so the set is open
+# and validated by config.is_valid_selection_mode instead. The four original
+# names keep working, and "favorites" still means the default collection.
+BUILTIN_SELECTION_MODES = ("shuffle", "sequential", "favorites", "recent", "weighted", "least-shown")
+SelectionMode = str
+COLLECTION_MODE_PREFIX = "collection:"
+
+
+def collection_mode_id(mode: str) -> int | None:
+    """The collection id in a "collection:<id>" mode, or None for every other
+    mode (including a malformed one, which then falls back to shuffle)."""
+    if not mode.startswith(COLLECTION_MODE_PREFIX):
+        return None
+    try:
+        return int(mode[len(COLLECTION_MODE_PREFIX):])
+    except ValueError:
+        return None
+
+
+def is_valid_selection_mode(mode: str) -> bool:
+    return mode in BUILTIN_SELECTION_MODES or collection_mode_id(mode) is not None
 DitherName = Literal["floyd-steinberg", "atkinson", "bayer", "none"]
 CropMode = Literal["smart", "center", "fit"]
 
@@ -74,6 +94,18 @@ class Settings(BaseSettings):
     @classmethod
     def _validate_tz(cls, v: str) -> str:
         ZoneInfo(v)
+        return v
+
+    @field_validator("selection_mode")
+    @classmethod
+    def _validate_selection_mode(cls, v: str) -> str:
+        # SelectionMode is a plain str so "collection:<id>" fits, which means
+        # the type no longer rejects a typo. This does.
+        if not is_valid_selection_mode(v):
+            raise ValueError(
+                f"unknown selection mode {v!r}; expected one of "
+                f"{', '.join(BUILTIN_SELECTION_MODES)} or 'collection:<id>'"
+            )
         return v
 
     @field_validator("orientation", mode="before")

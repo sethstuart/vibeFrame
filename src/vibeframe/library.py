@@ -10,12 +10,19 @@ from sqlmodel import Session, select
 
 from vibeframe.cache import Cache, file_sha256
 from vibeframe.db import (
-    Favorite,
+    Collection,
+    CollectionMember,
     History,
     Image,
+    _resolve_collection,
+    collection_counts,
+    collection_ids_for_image,
+    default_collection_id,
     delete_image_by_path,
     get_existing_index,
     image_count,
+    list_collections,
+    set_membership,
     upsert_images,
 )
 from vibeframe.timing import timed
@@ -163,8 +170,10 @@ class ImageLibrary:
                 }],
             )
 
-    def count(self, favorites_only: bool = False) -> int:
-        return image_count(self.engine, favorites_only=favorites_only)
+    def count(self, favorites_only: bool = False, collection_id: int | None = None) -> int:
+        return image_count(
+            self.engine, favorites_only=favorites_only, collection_id=collection_id
+        )
 
     def safe_path(self, raw: str | Path) -> Path | None:
         """Resolve `raw` and return it only if the target stays inside the
@@ -192,11 +201,15 @@ class ImageLibrary:
         favorites_only: bool = False,
         query: str | None = None,
         sort: str = "newest",
+        collection_id: int | None = None,
     ) -> list[Image]:
+        cid = _resolve_collection(self.engine, favorites_only, collection_id)
         with Session(self.engine) as session:
             stmt = select(Image)
-            if favorites_only:
-                stmt = stmt.join(Favorite, Favorite.image_id == Image.id)
+            if cid is not None:
+                stmt = stmt.join(CollectionMember, CollectionMember.image_id == Image.id).where(
+                    CollectionMember.collection_id == cid
+                )
             if query:
                 stmt = stmt.where(Image.path.contains(query))  # type: ignore[attr-defined]
             if sort == "oldest":
@@ -209,16 +222,28 @@ class ImageLibrary:
             return list(session.exec(stmt))
 
     def bulk_favorite(self, image_ids: list[int], favorited: bool) -> int:
+        """Bulk add/remove against the built-in Favorites collection."""
+        cid = default_collection_id(self.engine)
+        if cid is None:
+            return 0
+        return self.bulk_set_collection(image_ids, cid, favorited)
+
+    def bulk_set_collection(self, image_ids: list[int], collection_id: int, member: bool) -> int:
+        """Add or remove many images from one collection. Returns how many rows
+        actually changed, so the caller can report "3 added" rather than "5
+        selected"."""
         if not image_ids:
             return 0
         n = 0
         with Session(self.engine) as session:
             for image_id in image_ids:
-                existing = session.get(Favorite, image_id)
-                if favorited and not existing:
-                    session.add(Favorite(image_id=image_id))
+                existing = session.get(CollectionMember, (collection_id, image_id))
+                if member and existing is None:
+                    session.add(
+                        CollectionMember(collection_id=collection_id, image_id=image_id)
+                    )
                     n += 1
-                elif not favorited and existing:
+                elif not member and existing is not None:
                     session.delete(existing)
                     n += 1
             session.commit()
@@ -273,12 +298,14 @@ class ImageLibrary:
         with Session(self.engine) as session:
             return session.exec(select(Image).where(Image.path == path)).first()
 
-    def all_ids(self, favorites_only: bool = False) -> list[int]:
+    def all_ids(self, favorites_only: bool = False, collection_id: int | None = None) -> list[int]:
+        cid = _resolve_collection(self.engine, favorites_only, collection_id)
         with Session(self.engine) as session:
-            if favorites_only:
-                stmt = select(Image.id).join(Favorite, Favorite.image_id == Image.id)
-            else:
-                stmt = select(Image.id)
+            stmt = select(Image.id)
+            if cid is not None:
+                stmt = stmt.join(CollectionMember, CollectionMember.image_id == Image.id).where(
+                    CollectionMember.collection_id == cid
+                )
             return list(session.exec(stmt))
 
     def recent_ids(self, limit: int) -> list[int]:
@@ -286,20 +313,36 @@ class ImageLibrary:
             stmt = select(Image.id).order_by(Image.added_at.desc()).limit(limit)
             return list(session.exec(stmt))
 
+    # Favourites are membership in the built-in collection; these three are
+    # kept as the one-tap star's API so the routes and templates that predate
+    # collections keep working unchanged.
     def toggle_favorite(self, image_id: int) -> bool:
-        with Session(self.engine) as session:
-            existing = session.get(Favorite, image_id)
-            if existing:
-                session.delete(existing)
-                session.commit()
-                return False
-            session.add(Favorite(image_id=image_id))
-            session.commit()
-            return True
+        cid = default_collection_id(self.engine)
+        if cid is None:
+            return False
+        now_member = not self.is_favorite(image_id)
+        set_membership(self.engine, cid, image_id, now_member)
+        return now_member
 
     def is_favorite(self, image_id: int) -> bool:
+        cid = default_collection_id(self.engine)
+        if cid is None:
+            return False
         with Session(self.engine) as session:
-            return session.get(Favorite, image_id) is not None
+            return session.get(CollectionMember, (cid, image_id)) is not None
+
+    # ── collections ──
+    def collections(self) -> list[Collection]:
+        return list_collections(self.engine)
+
+    def collection_counts(self) -> dict[int, int]:
+        return collection_counts(self.engine)
+
+    def collections_for(self, image_id: int) -> list[int]:
+        return collection_ids_for_image(self.engine, image_id)
+
+    def set_collection(self, collection_id: int, image_id: int, member: bool) -> bool:
+        return set_membership(self.engine, collection_id, image_id, member)
 
     def last_shown(self, limit: int = 10) -> Iterable[tuple[int, str]]:
         with Session(self.engine) as session:

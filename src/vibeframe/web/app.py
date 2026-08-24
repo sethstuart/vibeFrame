@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from vibeframe.timing import record
 from vibeframe.web.deps import AppState
-from vibeframe.web.routes import favorites, images, metrics, system
+from vibeframe.web.routes import collections, favorites, images, metrics, system
 from vibeframe.web.routes import settings as settings_routes
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -57,6 +57,7 @@ def create_app(state: AppState) -> FastAPI:
 
     app.include_router(images.router)
     app.include_router(favorites.router)
+    app.include_router(collections.router)
     app.include_router(settings_routes.router)
     app.include_router(system.router)
     app.include_router(metrics.router)

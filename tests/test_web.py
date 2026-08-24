@@ -221,6 +221,161 @@ def test_backup_keep_persists_under_its_documented_key(tmp_settings):
     asyncio.run(run())
 
 
+def _collections(app):
+    from vibeframe.db import list_collections
+
+    return list_collections(app.state.app_state.engine)
+
+
+def test_collection_crud_round_trip(tmp_path: Path, tmp_settings):
+    """Create, edit weight + season, then delete — the editor's whole loop."""
+    tmp_settings.ensure_dirs()
+    app, _ = _setup(tmp_settings)
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test", follow_redirects=False
+        ) as client:
+            r = await client.post("/collections", data={"name": "Christmas"})
+            assert r.status_code == 303, r.text
+            names = [c.name for c in _collections(app)]
+            assert names == ["Favorites", "Christmas"], "default sorts first"
+
+            xmas = next(c for c in _collections(app) if c.name == "Christmas")
+            r = await client.post(
+                f"/collections/{xmas.id}",
+                data={
+                    "name": "Christmas", "weight": "2", "boost": "4",
+                    "start_month": "12", "start_day": "1",
+                    "end_month": "12", "end_day": "25",
+                },
+            )
+            assert r.status_code == 303, r.text
+            xmas = next(c for c in _collections(app) if c.id == xmas.id)
+            assert (xmas.weight, xmas.boost) == (2.0, 4.0)
+            assert (xmas.start_month, xmas.start_day) == (12, 1)
+            assert (xmas.end_month, xmas.end_day) == (12, 25)
+
+            # Clearing every season field is how "all year" is expressed.
+            r = await client.post(
+                f"/collections/{xmas.id}",
+                data={"name": "Christmas", "weight": "2", "boost": "4",
+                      "start_month": "", "start_day": "", "end_month": "", "end_day": ""},
+            )
+            assert r.status_code == 303, r.text
+            assert next(c for c in _collections(app) if c.id == xmas.id).start_month is None
+
+            r = await client.post(f"/collections/{xmas.id}/delete")
+            assert r.status_code == 303, r.text
+            assert [c.name for c in _collections(app)] == ["Favorites"]
+
+    asyncio.run(run())
+
+
+def test_collection_input_is_validated(tmp_path: Path, tmp_settings):
+    """A half-filled season would silently never match, and a duplicate name
+    would put two identical rows in the picker."""
+    tmp_settings.ensure_dirs()
+    app, _ = _setup(tmp_settings)
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test", follow_redirects=False
+        ) as client:
+            await client.post("/collections", data={"name": "Halloween"})
+            r = await client.post("/collections", data={"name": "Halloween"})
+            assert r.status_code == 422, r.text
+
+            hw = next(c for c in _collections(app) if c.name == "Halloween")
+            base = {"name": "Halloween", "weight": "1", "boost": "3"}
+
+            # Start set, end blank.
+            r = await client.post(
+                f"/collections/{hw.id}",
+                data={**base, "start_month": "10", "start_day": "1",
+                      "end_month": "", "end_day": ""},
+            )
+            assert r.status_code == 422, r.text
+
+            # Feb 30 does not exist in any year.
+            r = await client.post(
+                f"/collections/{hw.id}",
+                data={**base, "start_month": "2", "start_day": "30",
+                      "end_month": "3", "end_day": "1"},
+            )
+            assert r.status_code == 422, r.text
+
+            r = await client.post(f"/collections/{hw.id}", data={**base, "weight": "-1"})
+            assert r.status_code == 422, r.text
+
+    asyncio.run(run())
+
+
+def test_favorites_collection_cannot_be_removed_through_the_api(tmp_settings):
+    tmp_settings.ensure_dirs()
+    app, _ = _setup(tmp_settings)
+    favorites = _collections(app)[0]
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test", follow_redirects=False
+        ) as client:
+            r = await client.post(f"/collections/{favorites.id}/delete")
+            assert r.status_code == 409, r.text
+            r = await client.post(
+                f"/collections/{favorites.id}",
+                data={"name": "Starred", "weight": "1", "boost": "3"},
+            )
+            assert r.status_code == 409, r.text
+            # Its other fields stay editable.
+            r = await client.post(
+                f"/collections/{favorites.id}",
+                data={"name": favorites.name, "weight": "5", "boost": "3"},
+            )
+            assert r.status_code == 303, r.text
+
+    asyncio.run(run())
+
+
+def test_library_filters_by_collection_and_survives_a_deleted_one(tmp_path: Path, tmp_settings):
+    """?collection_id=N narrows the grid; a stale id falls back to the whole
+    library rather than rendering an unexplained empty grid."""
+    tmp_settings.ensure_dirs()
+    photos = tmp_settings.photos_dir
+    photos.mkdir(parents=True, exist_ok=True)
+    for i in range(3):
+        Image.new("RGB", (8, 8), (i * 20, 30, 40)).save(photos / f"p{i}.jpg", "JPEG")
+    app, library = _setup(tmp_settings)
+    ids = sorted(i.id for i in library.list(limit=10))
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post("/collections", data={"name": "Iceland"})
+            trip = next(c for c in _collections(app) if c.name == "Iceland")
+
+            r = await client.post(f"/collections/{trip.id}/images/{ids[0]}")
+            assert r.status_code == 200, r.text
+
+            r = await client.get("/images", params={"collection_id": trip.id})
+            assert r.text.count('class="photo-card"') == 1
+            assert "Iceland" in r.text
+
+            r = await client.delete(f"/collections/{trip.id}/images/{ids[0]}")
+            assert r.status_code == 200, r.text
+            r = await client.get("/images", params={"collection_id": trip.id})
+            assert r.text.count('class="photo-card"') == 0
+
+            # Stale id → whole library, not an empty grid.
+            r = await client.get("/images", params={"collection_id": 99999})
+            assert r.text.count('class="photo-card"') == 3
+
+    asyncio.run(run())
+
+
 def test_next_partial_url_encodes_filters():
     """The sentinel URL goes through urlencode, unlike the pager's Jinja macro:
     a search term containing & has to survive the round trip."""
@@ -286,7 +441,9 @@ def test_html_pages_render(tmp_settings):
     async def run():
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            for path in ("/", "/images", "/settings", "/metrics", "/metrics/fragment"):
+            for path in (
+                "/", "/images", "/collections", "/settings", "/metrics", "/metrics/fragment"
+            ):
                 r = await client.get(path)
                 assert r.status_code == 200, f"{path} -> {r.status_code}: {r.text[:200]}"
                 assert "text/html" in r.headers["content-type"]
