@@ -1,116 +1,226 @@
 {% extends "base.html" %}
-{% from "_macros.html" import icon %}
+{% from "_macros.html" import icon, tag %}
 {% set active = 'collections' %}
 {% macro season_label(c) -%}
   {%- if c.start_month -%}
     {{ months[c.start_month - 1][1] }} {{ c.start_day }} – {{ months[c.end_month - 1][1] }} {{ c.end_day }}
   {%- else -%}All year{%- endif -%}
 {%- endmacro %}
+{% macro page_url(page) -%}
+  ?collection_id={{ active_col.id }}&offset={{ (page - 1) * limit }}&limit={{ limit }}{% if q %}&q={{ q }}{% endif %}{% if sort and sort != 'newest' %}&sort={{ sort }}{% endif %}
+{%- endmacro %}
 {% block body %}
-<section class="page-title">
-  <h1>Collections</h1>
-  <span class="subtitle">a photo can live in any number of them</span>
-</section>
+<div x-data="libraryPage()">
+  <section class="page-title">
+    <h1>Collections</h1>
+    <span class="subtitle">a photo can live in any number of them</span>
+  </section>
 
-<form method="post" action="/collections" class="collection-new">
-  <input type="text" name="name" class="text-input" placeholder="New collection name…"
-         maxlength="80" required aria-label="New collection name" />
-  <button type="submit" class="btn btn-primary sm">{{ icon('plus', 16) }}<span>Create</span></button>
-</form>
+  {# One tab per collection. The built-in Favorites collection sorts first and
+     is the landing tab; a ?collection_id that no longer exists falls back to
+     it on the server side. #}
+  <nav class="collection-tabs" aria-label="Collections">
+    {% for c in collections %}
+    {{ tag(c.name, href='/collections?collection_id=' ~ c.id ~ '&sort=' ~ sort,
+           active=active_col.id == c.id) }}
+    {% endfor %}
+  </nav>
 
-<div class="collection-list">
-  {% for c in collections %}
-  <article class="card padded collection-card">
+  <form method="post" action="/collections" class="collection-new">
+    <input type="text" name="name" class="text-input" placeholder="New collection name…"
+           maxlength="80" required aria-label="New collection name" />
+    <button type="submit" class="btn btn-primary sm">{{ icon('plus', 16) }}<span>Create</span></button>
+  </form>
+
+  <article class="card padded">
     <header class="collection-head">
-      <h3>
-        {{ c.name }}
-        {% if c.is_default %}<span class="badge">built-in</span>{% endif %}
-      </h3>
-      <span class="count">{{ counts.get(c.id, 0) }} of {{ total }}</span>
+      <h2>
+        {{ active_col.name }}
+        {% if active_col.is_default %}<span class="badge">built-in</span>{% endif %}
+      </h2>
+      <div class="cluster">
+        <button class="btn btn-secondary sm" @click="toggleMode()">
+          <span x-show="!mode">Select</span>
+          <span x-show="mode" x-cloak>Done</span>
+        </button>
+        <span class="count">{{ counts.get(active_col.id, 0) }} of {{ library_total }}</span>
+      </div>
     </header>
 
     <p class="collection-summary">
-      Weight {{ '%g'|format(c.weight) }}
-      {%- if c.start_month %} · {{ season_label(c) }}, ×{{ '%g'|format(c.boost) }} in season
+      Weight {{ '%g'|format(active_col.weight) }}
+      {%- if active_col.start_month %} · {{ season_label(active_col) }}, ×{{ '%g'|format(active_col.boost) }} in season
       {%- else %} · all year{% endif %}
     </p>
 
-    <div class="collection-links">
-      <a class="btn btn-ghost sm" href="/images?collection_id={{ c.id }}">View images →</a>
-    </div>
-
-    {# Collapsed by default: an always-open form per collection turns a handful
-       of them into an unreadable wall on a phone. <details> keeps that free of
-       JavaScript, matching the rest of this page. #}
+    {# Collapsed by default: the tab is the photos, and the settings are one
+       click away when they're needed. #}
     <details class="collection-details">
-      <summary>Edit</summary>
-    <form method="post" action="/collections/{{ c.id }}" class="collection-edit">
-      <div class="field">
-        <label for="name-{{ c.id }}">Name</label>
-        <input id="name-{{ c.id }}" name="name" type="text" class="text-input" maxlength="80"
-               value="{{ c.name }}" {% if c.is_default %}readonly
-               title="The built-in collection keeps its name"{% endif %} />
-      </div>
-
-      <div class="field">
-        <label for="weight-{{ c.id }}">Weight</label>
-        <input id="weight-{{ c.id }}" name="weight" type="number" class="text-input"
-               min="0" max="100" step="0.5" value="{{ '%g'|format(c.weight) }}" />
-        <span class="help">Relative likelihood under weighted selection. 0 excludes it.</span>
-      </div>
-
-      {# Recurring annual window: the same Dec 1 – Dec 25 applies every year, so
-         there is deliberately no year field. Leave all four blank for no season. #}
-      <fieldset class="collection-season">
-        <legend>Season (optional, repeats every year)</legend>
-        {# Written out rather than via select_input: that macro derives `name`
-           from its first argument, and the ids here have to be unique per
-           collection while the field names must not be. #}
-        <div class="season-row">
-          <span class="season-label">From</span>
-          <select id="start_month-{{ c.id }}" name="start_month" class="select-input"
-                  aria-label="Season start month">
-            <option value="">—</option>
-            {% for num, label in months %}
-            <option value="{{ num }}" {% if c.start_month == num %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-          <input name="start_day" type="number" class="text-input day" min="1" max="31"
-                 placeholder="day" value="{{ c.start_day or '' }}" aria-label="Season start day" />
+      <summary>Edit settings</summary>
+      <form method="post" action="/collections/{{ active_col.id }}" class="collection-edit">
+        <div class="field">
+          <label for="name-{{ active_col.id }}">Name</label>
+          <input id="name-{{ active_col.id }}" name="name" type="text" class="text-input" maxlength="80"
+                 value="{{ active_col.name }}" {% if active_col.is_default %}readonly
+                 title="The built-in collection keeps its name"{% endif %} />
         </div>
-        <div class="season-row">
-          <span class="season-label">To</span>
-          <select id="end_month-{{ c.id }}" name="end_month" class="select-input"
-                  aria-label="Season end month">
-            <option value="">—</option>
-            {% for num, label in months %}
-            <option value="{{ num }}" {% if c.end_month == num %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-          <input name="end_day" type="number" class="text-input day" min="1" max="31"
-                 placeholder="day" value="{{ c.end_day or '' }}" aria-label="Season end day" />
-        </div>
-        <div class="season-row">
-          <span class="season-label">Boost</span>
-          <input name="boost" type="number" class="text-input day" min="0" max="100" step="0.5"
-                 value="{{ '%g'|format(c.boost) }}" aria-label="In-season weight multiplier" />
-        </div>
-        <span class="help">Weight is multiplied by this while the window is open.</span>
-      </fieldset>
 
-      <div class="collection-actions">
-        <button type="submit" class="btn btn-secondary sm">Save</button>
-      </div>
-    </form>
+        <div class="field">
+          <label for="weight-{{ active_col.id }}">Weight</label>
+          <input id="weight-{{ active_col.id }}" name="weight" type="number" class="text-input"
+                 min="0" max="100" step="0.5" value="{{ '%g'|format(active_col.weight) }}" />
+          <span class="help">Relative likelihood under weighted selection. 0 excludes it.</span>
+        </div>
 
-    {% if not c.is_default %}
-    <form method="post" action="/collections/{{ c.id }}/delete" class="collection-delete"
-          onsubmit="return confirm('Delete the {{ c.name }} collection? The photos stay in your library.');">
-      <button type="submit" class="btn btn-danger sm">Delete collection</button>
-    </form>
-    {% endif %}
+        {# Recurring annual window: the same Dec 1 – Dec 25 applies every year, so
+           there is deliberately no year field. Leave all four blank for no season. #}
+        <fieldset class="collection-season">
+          <legend>Season (optional, repeats every year)</legend>
+          {# Written out rather than via select_input: that macro derives `name`
+             from its first argument, and the ids here have to be unique per
+             collection while the field names must not be. #}
+          <div class="season-row">
+            <span class="season-label">From</span>
+            <select id="start_month-{{ active_col.id }}" name="start_month" class="select-input"
+                    aria-label="Season start month">
+              <option value="">—</option>
+              {% for num, label in months %}
+              <option value="{{ num }}" {% if active_col.start_month == num %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <input name="start_day" type="number" class="text-input day" min="1" max="31"
+                   placeholder="day" value="{{ active_col.start_day or '' }}" aria-label="Season start day" />
+          </div>
+          <div class="season-row">
+            <span class="season-label">To</span>
+            <select id="end_month-{{ active_col.id }}" name="end_month" class="select-input"
+                    aria-label="Season end month">
+              <option value="">—</option>
+              {% for num, label in months %}
+              <option value="{{ num }}" {% if active_col.end_month == num %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <input name="end_day" type="number" class="text-input day" min="1" max="31"
+                   placeholder="day" value="{{ active_col.end_day or '' }}" aria-label="Season end day" />
+          </div>
+          <div class="season-row">
+            <span class="season-label">Boost</span>
+            <input name="boost" type="number" class="text-input day" min="0" max="100" step="0.5"
+                   value="{{ '%g'|format(active_col.boost) }}" aria-label="In-season weight multiplier" />
+          </div>
+          <span class="help">Weight is multiplied by this while the window is open.</span>
+        </fieldset>
+
+        <div class="collection-actions">
+          <button type="submit" class="btn btn-secondary sm">Save</button>
+        </div>
+      </form>
+
+      {% if not active_col.is_default %}
+      <form method="post" action="/collections/{{ active_col.id }}/delete" class="collection-delete"
+            onsubmit="return confirm('Delete the {{ active_col.name }} collection? The photos stay in your library.');">
+        <button type="submit" class="btn btn-danger sm">Delete collection</button>
+      </form>
+      {% endif %}
     </details>
   </article>
-  {% endfor %}
+
+  <form method="get" action="/collections" class="filter-bar">
+    <div class="filter-controls">
+      <input type="search" name="q" value="{{ q }}" placeholder="Search filename…" />
+      <select name="sort" class="select-input" onchange="this.form.submit()">
+        <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest</option>
+        <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>Oldest</option>
+        <option value="name" {% if sort == 'name' %}selected{% endif %}>Name</option>
+      </select>
+      <input type="hidden" name="collection_id" value="{{ active_col.id }}" />
+      <button type="submit" class="btn btn-secondary sm">Apply</button>
+    </div>
+  </form>
+
+  <div class="photo-grid" :class="mode ? 'is-select-mode' : ''">
+    {% if images %}{% include "_photo_cards.html" %}{% else %}
+    <p class="muted">No images in this collection yet.</p>
+    {% endif %}
+  </div>
+
+  <!-- Collection picker. One panel for the whole page rather than one per card:
+       24 cards x N collections of hidden markup is a lot of DOM for something
+       only ever open once at a time. It doubles as the bulk picker — when
+       pickerIds holds more than one id the checkboxes apply to all of them. -->
+  <span id="collections-data" hidden data-collections="{{ collections_json }}"></span>
+  <div class="picker-overlay" x-show="pickerIds.length" x-cloak
+       @click.self="closePicker()"
+       @keydown.escape.window="closePicker()">
+    <div class="picker-panel" role="dialog" aria-label="Add to collection">
+      <header class="picker-head">
+        <h3>Add to collection</h3>
+        <button type="button" class="icon-btn" aria-label="Close" @click="closePicker()">×</button>
+      </header>
+      <p class="picker-subject" x-text="pickerLabel"></p>
+      <ul class="picker-list">
+        <template x-for="c in allCollections" :key="c.id">
+          <li>
+            <label>
+              <input type="checkbox" :checked="picked.has(c.id)"
+                     :disabled="pickerBusy" @change="togglePick(c.id)" />
+              <span x-text="c.name"></span>
+            </label>
+          </li>
+        </template>
+      </ul>
+      <p class="picker-empty" x-show="!allCollections.length">
+        No collections yet — make one above.
+      </p>
+    </div>
+  </div>
+
+  <!-- Lightbox overlay. Click the backdrop or the × to dismiss. Esc also closes. -->
+  <div class="lightbox" x-show="lbOpen" x-cloak
+       @click.self="closeLightbox()"
+       @keydown.escape.window="closeLightbox()">
+    <button type="button" class="lightbox-close" aria-label="Close" @click="closeLightbox()">×</button>
+    <figure class="lightbox-figure" @click="closeLightbox()">
+      <img :src="lbId ? `/images/${lbId}/full.jpg` : ''" alt="" />
+      <figcaption x-text="lbPath ? lbPath.split('/').pop() : ''"></figcaption>
+    </figure>
+  </div>
+
+  <!-- Bulk action bar (only visible in selection mode with selections) -->
+  <div class="bulk-bar" x-show="mode && count > 0" x-cloak>
+    <span class="count" x-text="count + (count === 1 ? ' selected' : ' selected')"></span>
+    <button class="btn btn-secondary sm"
+            @click="fetch('/images/bulk/favorite', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: list(), favorited: true})}).then(()=>{clear(); location.reload();})">
+      Favorite
+    </button>
+    <button class="btn btn-secondary sm"
+            @click="fetch('/images/bulk/favorite', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: list(), favorited: false})}).then(()=>{clear(); location.reload();})">
+      Unfavorite
+    </button>
+    <button class="btn btn-secondary sm" @click="openBulkPicker()">
+      Add to collection
+    </button>
+    <button class="btn btn-danger sm"
+            @click="if(confirm('Delete '+count+' images from NFS?')) fetch('/images/bulk/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: list()})}).then(()=>{clear(); location.reload();})">
+      Delete
+    </button>
+  </div>
 </div>
+
+{# Desktop only — CSS hides this below 720px, where the sentinel in
+   _photo_cards.html takes over with continuous scroll. #}
+{% if total_pages > 1 %}
+<nav class="pager library-pager" style="margin-top: var(--space-6);">
+  {% if current_page > 1 %}<a href="{{ page_url(current_page - 1) }}">← Prev</a>{% endif %}
+  {% for p in page_numbers %}
+  {% if p is none %}<span class="gap">…</span>
+  {% elif p == current_page %}<span class="current">{{ p }}</span>
+  {% else %}<a href="{{ page_url(p) }}">{{ p }}</a>
+  {% endif %}
+  {% endfor %}
+  {% if current_page < total_pages %}<a href="{{ page_url(current_page + 1) }}">Next →</a>{% endif %}
+</nav>
+{% endif %}
+
+{% include "_library_scripts.html" %}
 {% endblock %}

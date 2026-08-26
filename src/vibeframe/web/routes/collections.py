@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -16,6 +18,7 @@ from vibeframe.db import (
     update_collection,
 )
 from vibeframe.web.deps import AppState, get_state, require_token
+from vibeframe.web.routes.images import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, _page_numbers
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 
@@ -84,18 +87,101 @@ def _positive(raw: str, label: str) -> float:
     return value
 
 
+def _partial_url(offset: int, limit: int, collection_id: int, q: str | None, sort: str) -> str:
+    """URL the infinite-scroll sentinel fetches for the page after this one.
+
+    Built here rather than in the template so the query string goes through
+    urlencode — the pager's Jinja macro interpolates `q` raw, and a search
+    term containing & would break. The collection id is always included, so
+    the scroll chain never drops the active tab."""
+    params: dict[str, str] = {
+        "offset": str(offset + limit),
+        "limit": str(limit),
+        "partial": "true",
+        "collection_id": str(collection_id),
+    }
+    if q:
+        params["q"] = q
+    if sort and sort != "newest":
+        params["sort"] = sort
+    return f"/collections?{urlencode(params)}"
+
+
 @router.get("", response_class=HTMLResponse)
-async def collections_page(request: Request, state: AppState = Depends(get_state)):
+async def collections_page(
+    request: Request,
+    collection_id: int | None = None,
+    limit: int = PAGE_SIZE_DEFAULT,
+    offset: int = 0,
+    q: str | None = None,
+    sort: str = "newest",
+    partial: bool = False,
+    state: AppState = Depends(get_state),
+):
+    """The collection browser. Lands on the built-in Favorites collection;
+    every other collection is a sub-tab (?collection_id=N) whose tab shows
+    that collection's photos plus its weight/season settings.
+
+    A ?collection_id that no longer exists (deleted between clicks) falls
+    back to Favorites rather than rendering an unexplained empty page — the
+    same fallback /images uses for a stale filter id."""
+    limit = max(1, min(limit, PAGE_SIZE_MAX))
+    offset = max(0, offset)
     cols = list_collections(state.engine)
+    active = get_collection(state.engine, collection_id) if collection_id is not None else None
+    if active is None:
+        # Favorites always exists (boot seeds it, and it cannot be deleted),
+        # and list_collections sorts it first.
+        active = next((c for c in cols if c.is_default), cols[0])
     counts = collection_counts(state.engine)
+    total = state.library.count(collection_id=active.id)
+    total_pages = max(1, (total + limit - 1) // limit) if total else 1
+    current_page = offset // limit + 1
+    images = state.library.list(
+        limit=limit,
+        offset=offset,
+        favorites_only=False,
+        query=q,
+        sort=sort,
+        collection_id=active.id,
+    )
+    next_partial = (
+        _partial_url(offset, limit, active.id, q, sort) if current_page < total_pages else None
+    )
+    if partial:
+        # Bare cards for the mobile sentinel, same as /images?partial=true.
+        return request.app.state.templates.TemplateResponse(
+            request,
+            "_photo_cards.html",
+            {"images": images, "next_partial_url": next_partial},
+        )
     return request.app.state.templates.TemplateResponse(
         request,
         "collections.html",
         {
             "collections": cols,
+            "active_col": active,
             "counts": counts,
             "months": MONTHS,
-            "total": state.library.count(),
+            "library_total": state.library.count(),
+            "images": images,
+            "favorite_ids": set(state.library.all_ids(favorites_only=True)),
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "current_page": current_page,
+            "total_pages": total_pages,
+            "page_numbers": _page_numbers(current_page, total_pages),
+            "q": q or "",
+            "sort": sort,
+            "next_partial_url": next_partial,
+            # A plain str, deliberately NOT Markup: Jinja then autoescapes the
+            # quotes inside it when it lands in data-collections="...".
+            # jinja's |tojson escapes < > & ' but not ", so a collection named
+            # with a quote would otherwise break out of the attribute.
+            "collections_json": json.dumps(
+                [{"id": c.id, "name": c.name} for c in cols]
+            ),
         },
     )
 
@@ -106,10 +192,11 @@ async def create(
     state: AppState = Depends(get_state),
 ):
     try:
-        create_collection(state.engine, name)
+        created = create_collection(state.engine, name)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    return RedirectResponse("/collections", status_code=303)
+    # Land on the new collection's tab rather than a generic page.
+    return RedirectResponse(f"/collections?collection_id={created.id}", status_code=303)
 
 
 @router.post("/{collection_id}", dependencies=[Depends(require_token)])
@@ -144,7 +231,8 @@ async def update(
         raise HTTPException(status_code=422, detail=str(e)) from e
     if updated is None:
         raise HTTPException(status_code=404, detail="collection not found")
-    return RedirectResponse("/collections", status_code=303)
+    # Stay on the tab that was just edited.
+    return RedirectResponse(f"/collections?collection_id={collection_id}", status_code=303)
 
 
 @router.post("/{collection_id}/delete", dependencies=[Depends(require_token)])
@@ -157,6 +245,7 @@ async def remove(collection_id: int, state: AppState = Depends(get_state)):
         raise HTTPException(status_code=409, detail=str(e)) from e
     if not deleted:
         raise HTTPException(status_code=404, detail="collection not found")
+    # The tab is gone, so land back on Favorites.
     return RedirectResponse("/collections", status_code=303)
 
 

@@ -376,6 +376,70 @@ def test_library_filters_by_collection_and_survives_a_deleted_one(tmp_path: Path
     asyncio.run(run())
 
 
+def test_collections_page_lands_on_favorites_with_subtabs(tmp_path: Path, tmp_settings):
+    """Clicking Collections drops you into the built-in Favorites collection;
+    the other collections are sub-tabs (?collection_id=N). A stale id falls
+    back to Favorites the way /images handles a deleted filter, and the POSTs
+    keep the user on the tab they were editing."""
+    tmp_settings.ensure_dirs()
+    photos = tmp_settings.photos_dir
+    photos.mkdir(parents=True, exist_ok=True)
+    for i in range(3):
+        Image.new("RGB", (8, 8), (i * 20, 30, 40)).save(photos / f"p{i}.jpg", "JPEG")
+    app, library = _setup(tmp_settings)
+    ids = sorted(i.id for i in library.list(limit=10))
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test", follow_redirects=False
+        ) as client:
+            r = await client.post("/collections", data={"name": "Iceland"})
+            trip = next(c for c in _collections(app) if c.name == "Iceland")
+            assert r.status_code == 303
+            # Create lands on the new collection's tab.
+            assert r.headers["location"] == f"/collections?collection_id={trip.id}"
+
+            await client.post(f"/collections/{trip.id}/images/{ids[0]}")
+            await client.post(f"/collections/{trip.id}/images/{ids[1]}")
+
+            # Landing page: Favorites is the single active tab; its grid is empty.
+            r = await client.get("/collections")
+            assert r.status_code == 200, r.text
+            assert r.text.count('class="tag active"') == 1
+            assert r.text.count('class="photo-card"') == 0
+
+            # Sub-tab: Iceland shows only its own images.
+            r = await client.get("/collections", params={"collection_id": trip.id})
+            assert r.text.count('class="tag active"') == 1
+            assert r.text.count('class="photo-card"') == 2
+
+            # Stale id → Favorites, not an unexplained empty page.
+            r = await client.get("/collections", params={"collection_id": 99999})
+            assert r.status_code == 200, r.text
+
+            # Editing keeps the tab.
+            r = await client.post(
+                f"/collections/{trip.id}",
+                data={"name": "Iceland", "weight": "2", "boost": "3"},
+            )
+            assert r.status_code == 303
+            assert r.headers["location"] == f"/collections?collection_id={trip.id}"
+
+            # Mobile partial: bare cards, and the next sentinel keeps the tab.
+            r = await client.get(
+                "/collections",
+                params={"collection_id": trip.id, "limit": 1, "partial": "true"},
+            )
+            assert r.status_code == 200
+            assert "app-header" not in r.text
+            assert r.text.count('class="photo-card"') == 1
+            assert 'class="scroll-sentinel"' in r.text
+            assert f'collection_id={trip.id}"' in r.text
+
+    asyncio.run(run())
+
+
 def test_next_partial_url_encodes_filters():
     """The sentinel URL goes through urlencode, unlike the pager's Jinja macro:
     a search term containing & has to survive the round trip."""
